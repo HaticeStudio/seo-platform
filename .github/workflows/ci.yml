@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go build ./...
+      - run: go vet ./...
+      - run: go test ./...
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t seo-platform:ci .
+
+  compose-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Config contract test: a missing required variable must fail here,
+      # not during a production sync.
+      - run: |
+          SEO_PUBLIC_URL=https://example.com \
+          SEO_SECRETS_MASTER_KEY=0000000000000000000000000000000000000000000000000000000000000000 \
+          SEO_API_KEYS=0000000000000000000000000000000000000000000000000000000000000000=read \
+          docker compose -f deploy/docker-compose.yml config -q
+      - name: compose config fails without required vars
+        run: |
+          if docker compose -f deploy/docker-compose.yml config -q 2>/dev/null; then
+            echo "compose config should fail when required variables are missing" >&2
+            exit 1
+          fi
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
