@@ -102,15 +102,17 @@ jobs:
 
   standalone-smoke:
     runs-on: ubuntu-latest
+    env:
+      SEO_PUBLIC_URL: https://site-under-test.invalid
     steps:
       - uses: actions/checkout@v4
-      - run: SEO_PUBLIC_URL=https://site-under-test.invalid docker compose -f deploy/docker-compose.yml up -d --build --wait
+      - run: docker compose -f deploy/docker-compose.yml up -d --build --wait
       - name: Bootstrap and exercise the authenticated API
         run: |
-          API_KEY=$(docker compose -f deploy/docker-compose.yml exec -T seo-platform seo-platform admin bootstrap)
+          SEO_SMOKE_TOKEN=$(docker compose -f deploy/docker-compose.yml exec -T seo-platform seo-platform admin bootstrap)
           curl --fail http://127.0.0.1:8080/healthz
           curl --fail http://127.0.0.1:8080/readyz
-          curl --fail -H "Authorization: Bearer $API_KEY" http://127.0.0.1:8080/api/v0/providers
+          curl --fail -H "Authorization: Bearer $SEO_SMOKE_TOKEN" http://127.0.0.1:8080/api/v0/providers
           if docker compose -f deploy/docker-compose.yml exec -T seo-platform seo-platform admin bootstrap; then
             echo "bootstrap key was returned twice" >&2
             exit 1
