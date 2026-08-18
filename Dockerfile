@@ -5,7 +5,7 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -o /out/seo-platform ./cmd/seo-platform
 
-FROM node:22-alpine AS console
+FROM node:26-alpine AS console
 WORKDIR /console
 COPY console/package.json console/package-lock.json ./
 RUN npm ci --no-fund --no-audit
