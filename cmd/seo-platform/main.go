@@ -26,6 +26,7 @@ import (
 	"github.com/HaticeStudio/seo-platform/internal/store"
 	syncengine "github.com/HaticeStudio/seo-platform/internal/sync"
 	"github.com/HaticeStudio/seo-platform/providers/bing"
+	"github.com/HaticeStudio/seo-platform/providers/searchconsole"
 )
 
 func main() {
@@ -96,8 +97,10 @@ func run(logger *slog.Logger) error {
 	// The standalone binary ships every provider; each stays not_configured
 	// (and costs nothing) until an administrator adds credentials.
 	reg := registry.New()
-	if err := reg.Register(bing.New()); err != nil {
-		return err
+	for _, provider := range []core.Provider{bing.New(), searchconsole.New()} {
+		if err := reg.Register(provider); err != nil {
+			return err
+		}
 	}
 
 	for _, d := range reg.Descriptors() {
