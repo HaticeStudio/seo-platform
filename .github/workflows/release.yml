@@ -53,7 +53,7 @@ jobs:
           tar -C console/dist -czf "release/seo-console-app-${GITHUB_REF_NAME}.tar.gz" app
           cd release
           sha256sum *.tar.gz *.tgz > SHA256SUMS
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
