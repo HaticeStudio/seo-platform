@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import axe from 'axe-core'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SeoConsole } from './SeoConsole'
@@ -19,6 +19,7 @@ const responses: Record<string, unknown> = {
         credential_types: ['api_key'],
         capabilities: [{ capability: 'search.performance', supports_cursor: false }],
         setup_url: 'https://provider.example/settings',
+        setup_links: [{ label: 'Provider settings', url: 'https://provider.example/settings' }],
         oauth_available: false,
       },
     ],
@@ -72,6 +73,10 @@ describe('SeoConsole', () => {
     expect(screen.getByDisplayValue('https://www.example.test/sitemap.xml')).toBeTruthy()
     expect(screen.getByText('Connected')).toBeTruthy()
     expect(await screen.findByText('7')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Reconfigure' }))
+    expect(screen.getByRole('link', { name: /Provider settings/ }).getAttribute('href')).toBe(
+      'https://provider.example/settings',
+    )
     await waitFor(() => expect(fetch).toHaveBeenCalled())
 
     for (const call of vi.mocked(fetch).mock.calls) {
