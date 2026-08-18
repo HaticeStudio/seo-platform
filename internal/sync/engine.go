@@ -175,7 +175,7 @@ func (e *Engine) execute(runID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), e.cfg.Timeout)
 	defer cancel()
 
-	run, err := e.store.GetSyncRun(ctx, runID)
+	run, err := e.store.GetSyncRun(ctx, e.site.ID, runID)
 	if err != nil {
 		e.logger.Error("read sync run", "run", runID, "error", err)
 		return
@@ -195,14 +195,15 @@ func (e *Engine) execute(runID string) {
 		e.finish(run, core.SyncResult{}, &core.SyncError{Code: core.ErrNotConfigured, Message: "provider is not configured"})
 		return
 	}
-	credential, err := e.secrets.Open(ctx, connection.CredentialRef, core.PurposeSync)
+	scope := core.Scope{SiteID: e.site.ID, Provider: run.Provider}
+	credential, err := e.secrets.Open(ctx, scope, connection.CredentialRef, core.PurposeSync)
 	if err != nil {
 		e.finish(run, core.SyncResult{}, &core.SyncError{Code: core.ErrUnauthorized, Message: "credential is not available"})
 		return
 	}
 	defer credential.Close()
 
-	sink := &storeSink{store: e.store, runID: runID}
+	sink := &storeSink{store: e.store, siteID: e.site.ID, runID: runID}
 	result, syncErr := provider.Sync(ctx, core.SyncRequest{
 		Site:       e.site,
 		Property:   core.Property{ConnectionID: connection.ID, Reference: connection.PropertyReference},
@@ -310,12 +311,13 @@ func (e *Engine) tick(ctx context.Context) {
 
 // storeSink adapts the store to core.SnapshotSink for one run.
 type storeSink struct {
-	store *store.Store
-	runID string
+	store  *store.Store
+	siteID string
+	runID  string
 }
 
 func (s *storeSink) Write(ctx context.Context, dataset string, rows []map[string]any) error {
-	return s.store.UpsertReportRows(ctx, dataset, rows)
+	return s.store.UpsertReportRows(ctx, s.siteID, dataset, rows)
 }
 
 func (s *storeSink) Checkpoint(ctx context.Context, cursor string) error {

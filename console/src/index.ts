@@ -13,5 +13,7 @@ export {
   type AuthClient,
   type Connection,
   type ProviderDescriptor,
+  type ReportRow,
+  type SiteContext,
   type SyncRun,
 } from './api'

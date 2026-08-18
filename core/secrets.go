@@ -53,9 +53,9 @@ type CredentialHandle interface {
 // this repo are for development and single-machine use.
 type SecretStore interface {
 	Put(ctx context.Context, scope Scope, material SecretMaterial) (CredentialRef, error)
-	Open(ctx context.Context, ref CredentialRef, purpose AccessPurpose) (CredentialHandle, error)
+	Open(ctx context.Context, scope Scope, ref CredentialRef, purpose AccessPurpose) (CredentialHandle, error)
 	// Rotate atomically replaces the material behind ref. The ref stays valid
 	// so business rows holding it need no update.
-	Rotate(ctx context.Context, ref CredentialRef, replacement SecretMaterial) error
-	Revoke(ctx context.Context, ref CredentialRef) error
+	Rotate(ctx context.Context, scope Scope, ref CredentialRef, replacement SecretMaterial) error
+	Revoke(ctx context.Context, scope Scope, ref CredentialRef) error
 }

@@ -36,34 +36,43 @@ func (m *Memory) Put(_ context.Context, scope core.Scope, material core.SecretMa
 	return core.CredentialRef{ID: id, Type: material.Type}, nil
 }
 
-func (m *Memory) Open(_ context.Context, ref core.CredentialRef, _ core.AccessPurpose) (core.CredentialHandle, error) {
+func (m *Memory) Open(_ context.Context, scope core.Scope, ref core.CredentialRef, _ core.AccessPurpose) (core.CredentialHandle, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	entry, ok := m.entries[ref.ID]
 	if !ok || entry.revoked {
 		return nil, fmt.Errorf("credential %s is not available", ref.ID)
 	}
+	if entry.scope != scope {
+		return nil, fmt.Errorf("credential scope does not match")
+	}
 	return &handle{material: cloneMaterial(entry.material)}, nil
 }
 
-func (m *Memory) Rotate(_ context.Context, ref core.CredentialRef, replacement core.SecretMaterial) error {
+func (m *Memory) Rotate(_ context.Context, scope core.Scope, ref core.CredentialRef, replacement core.SecretMaterial) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	entry, ok := m.entries[ref.ID]
 	if !ok || entry.revoked {
 		return fmt.Errorf("credential %s is not available", ref.ID)
 	}
+	if entry.scope != scope {
+		return fmt.Errorf("credential scope does not match")
+	}
 	entry.material = cloneMaterial(replacement)
 	m.entries[ref.ID] = entry
 	return nil
 }
 
-func (m *Memory) Revoke(_ context.Context, ref core.CredentialRef) error {
+func (m *Memory) Revoke(_ context.Context, scope core.Scope, ref core.CredentialRef) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	entry, ok := m.entries[ref.ID]
 	if !ok {
 		return nil
+	}
+	if entry.scope != scope {
+		return fmt.Errorf("credential scope does not match")
 	}
 	// Drop the material immediately; keep only a tombstone.
 	entry.material = core.SecretMaterial{}

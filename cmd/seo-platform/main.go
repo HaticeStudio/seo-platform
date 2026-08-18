@@ -5,6 +5,10 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -13,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -31,6 +36,13 @@ import (
 )
 
 func main() {
+	if len(os.Args) == 3 && os.Args[1] == "admin" && os.Args[2] == "bootstrap" {
+		if err := printBootstrapToken(envOr("SEO_BOOTSTRAP_TOKEN_FILE", "data/bootstrap/admin-api-key")); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	if err := run(logger); err != nil {
 		logger.Error("server exited", "error", err)
@@ -46,6 +58,11 @@ func run(logger *slog.Logger) error {
 	parsed, err := url.Parse(publicURL)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 		return errors.New("SEO_PUBLIC_URL must be an absolute URL")
+	}
+	platformURL := envOr("SEO_BASE_URL", publicURL)
+	platformParsed, platformErr := url.Parse(platformURL)
+	if platformErr != nil || platformParsed.Scheme == "" || platformParsed.Host == "" || platformParsed.User != nil || platformParsed.RawQuery != "" || platformParsed.Fragment != "" || (platformParsed.Scheme != "https" && !isLoopbackURL(platformParsed)) {
+		return errors.New("SEO_BASE_URL must be an absolute https URL (or loopback URL)")
 	}
 	sitemapURL := strings.TrimSpace(os.Getenv("SEO_SITEMAP_URL"))
 	if sitemapURL == "" {
@@ -67,14 +84,18 @@ func run(logger *slog.Logger) error {
 	}
 
 	var secretStore core.SecretStore
-	if key := strings.TrimSpace(os.Getenv("SEO_SECRETS_MASTER_KEY")); key != "" {
+	key := strings.TrimSpace(os.Getenv("SEO_SECRETS_MASTER_KEY"))
+	if key == "" {
+		key, err = loadOrCreateHexSecret(envOr("SEO_SECRETS_KEY_FILE", "data/keys/master-key"), 32)
+		if err != nil {
+			return fmt.Errorf("load secret-store master key: %w", err)
+		}
+	}
+	if key != "" {
 		secretStore, err = secrets.NewFile(envOr("SEO_SECRETS_DIR", "data/secrets"), key)
 		if err != nil {
 			return fmt.Errorf("open secret store: %w", err)
 		}
-	} else {
-		logger.Warn("SEO_SECRETS_MASTER_KEY is not set; using in-memory secret store (credentials are lost on restart)")
-		secretStore = secrets.NewMemory()
 	}
 
 	var authenticator auth.Authenticator
@@ -92,7 +113,17 @@ func run(logger *slog.Logger) error {
 		}
 		authenticator = auth.DevLoopback{}
 	default:
-		return errors.New("no auth configured: set SEO_API_KEYS, or SEO_DEV_AUTH=true for loopback development")
+		spec, bootstrapErr := loadOrCreateBootstrapAPIKey(
+			envOr("SEO_API_KEY_HASH_FILE", "data/auth/admin-api-key.sha256"),
+			envOr("SEO_BOOTSTRAP_TOKEN_FILE", "data/bootstrap/admin-api-key"),
+		)
+		if bootstrapErr != nil {
+			return fmt.Errorf("initialize local API key: %w", bootstrapErr)
+		}
+		authenticator, err = auth.NewAPIKey(spec)
+		if err != nil {
+			return fmt.Errorf("load local API key: %w", err)
+		}
 	}
 
 	// The standalone binary ships every provider; each stays not_configured
@@ -126,7 +157,7 @@ func run(logger *slog.Logger) error {
 	defer stop()
 	go engine.Run(runCtx)
 
-	api := httpapi.New(st, reg, engine, authenticator, secretStore, site, logger)
+	api := httpapi.New(st, reg, engine, authenticator, secretStore, site, logger).WithPlatformURL(platformURL)
 	// Google OAuth client for interactive authorization: deployment
 	// configuration, used server-side only. Without it, service-account JSON
 	// and API-key credentials still work through the credential endpoint.
@@ -170,6 +201,102 @@ func run(logger *slog.Logger) error {
 	return nil
 }
 
+func loadOrCreateHexSecret(filename string, size int) (string, error) {
+	if raw, err := os.ReadFile(filename); err == nil {
+		value := strings.TrimSpace(string(raw))
+		if decoded, decodeErr := hex.DecodeString(value); decodeErr == nil && len(decoded) == size {
+			return value, nil
+		}
+		return "", fmt.Errorf("%s is invalid", filename)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	buf := make([]byte, size)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	value := hex.EncodeToString(buf)
+	if err := writeSecretFile(filename, []byte(value+"\n")); err != nil {
+		return "", err
+	}
+	return value, nil
+}
+
+func loadOrCreateBootstrapAPIKey(hashFile, tokenFile string) (string, error) {
+	if raw, err := os.ReadFile(hashFile); err == nil {
+		hash := strings.TrimSpace(string(raw))
+		if decoded, decodeErr := hex.DecodeString(hash); decodeErr != nil || len(decoded) != sha256.Size {
+			return "", fmt.Errorf("%s is invalid", hashFile)
+		}
+		return hash + "=" + allAdminScopes(), nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	token := base64.RawURLEncoding.EncodeToString(buf)
+	sum := sha256.Sum256([]byte(token))
+	hash := hex.EncodeToString(sum[:])
+	if err := writeSecretFile(hashFile, []byte(hash+"\n")); err != nil {
+		return "", err
+	}
+	if err := writeSecretFile(tokenFile, []byte(token+"\n")); err != nil {
+		_ = os.Remove(hashFile)
+		return "", err
+	}
+	return hash + "=" + allAdminScopes(), nil
+}
+
+func allAdminScopes() string {
+	return strings.Join([]string{core.ScopeRead, core.ScopeSync, core.ScopeConnectionsManage, core.ScopeSitesManage, core.ScopeMembersManage, core.ScopeAuditRead}, ",")
+}
+
+func writeSecretFile(filename string, data []byte) error {
+	dir := filepath.Dir(filename)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".seo-secret-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, filename)
+}
+
+func printBootstrapToken(filename string) error {
+	raw, err := os.ReadFile(filename)
+	if errors.Is(err, os.ErrNotExist) {
+		return errors.New("bootstrap API key is no longer available; it is shown only once")
+	}
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(filename); err != nil {
+		return fmt.Errorf("consume bootstrap API key: %w", err)
+	}
+	fmt.Println(strings.TrimSpace(string(raw)))
+	return nil
+}
+
 func envOr(name, fallback string) string {
 	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
 		return v
@@ -189,4 +316,8 @@ func envDuration(name string, fallback time.Duration) time.Duration {
 		return v
 	}
 	return fallback
+}
+
+func isLoopbackURL(parsed *url.URL) bool {
+	return parsed.Hostname() == "localhost" || parsed.Hostname() == "127.0.0.1" || parsed.Hostname() == "::1"
 }

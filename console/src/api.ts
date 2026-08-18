@@ -21,6 +21,13 @@ export type ProviderDescriptor = {
   setup_url?: string
   docs_url?: string
   oauth_available: boolean
+  setup_links?: { label: string; url: string }[]
+}
+
+export type SiteContext = {
+  public_url: string
+  sitemap_url: string
+  oauth_callback: string
 }
 
 export type DiscoveredProperty = {
@@ -60,6 +67,13 @@ export type SyncRun = {
   error_message?: string
   started_at: string
   finished_at?: string
+}
+
+export type ReportRow = {
+  dataset: string
+  key: string
+  data: Record<string, unknown>
+  updated_at: string
 }
 
 // AuthClient supplies short-lived access tokens only. It never sees provider
@@ -114,6 +128,10 @@ export class ApiClient {
     return this.request('/api/v0/providers')
   }
 
+  getSite(): Promise<SiteContext> {
+    return this.request('/api/v0/site')
+  }
+
   listConnections(): Promise<{ connections: Connection[] }> {
     return this.request('/api/v0/connections')
   }
@@ -121,6 +139,15 @@ export class ApiClient {
   listSyncRuns(provider?: string): Promise<{ sync_runs: SyncRun[] }> {
     const query = provider ? `?provider=${encodeURIComponent(provider)}` : ''
     return this.request(`/api/v0/sync-runs${query}`)
+  }
+
+  listReportDatasets(): Promise<{ datasets: string[] }> {
+    return this.request('/api/v0/report-datasets')
+  }
+
+  listReportRows(dataset: string, limit = 100): Promise<{ rows: ReportRow[] }> {
+    const query = new URLSearchParams({ dataset, limit: String(limit) })
+    return this.request(`/api/v0/report-rows?${query}`)
   }
 
   setCredential(

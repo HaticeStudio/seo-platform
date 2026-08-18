@@ -72,10 +72,19 @@ func (s *Store) migrate() error {
 		if err != nil {
 			return err
 		}
-		if _, err := s.db.Exec(string(raw)); err != nil {
+		tx, err := s.db.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(string(raw)); err != nil {
+			_ = tx.Rollback()
 			return fmt.Errorf("migration %s: %w", name, err)
 		}
-		if _, err := s.db.Exec(`INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)`, name, time.Now().UTC().Format(timeLayout)); err != nil {
+		if _, err := tx.Exec(`INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)`, name, time.Now().UTC().Format(timeLayout)); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
@@ -155,6 +164,24 @@ func (s *Store) ConfigureConnection(ctx context.Context, siteID, provider string
 		return fmt.Errorf("connection %s/%s does not exist", siteID, provider)
 	}
 	return nil
+}
+
+// ConfigureConnectionCAS swaps a credential only when the connection still
+// references expected. It prevents concurrent reconfiguration from revoking
+// the credential another administrator just installed.
+func (s *Store) ConfigureConnectionCAS(ctx context.Context, siteID, provider string, expected, replacement core.CredentialRef, property string, enabled bool) (bool, error) {
+	now := time.Now().UTC().Format(timeLayout)
+	res, err := s.db.ExecContext(ctx, `
+        UPDATE provider_connections
+        SET credential_ref = ?, credential_type = ?, property_reference = ?, enabled = ?, updated_at = ?
+        WHERE site_id = ? AND provider = ? AND credential_ref = ?`,
+		replacement.ID, replacement.Type, property, boolInt(enabled), now,
+		siteID, provider, expected.ID)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n == 1, err
 }
 
 func (s *Store) UpdateConnectionOutcome(ctx context.Context, siteID, provider string, successAt *time.Time, dataThrough *time.Time, code core.ErrorCode, message string) error {
@@ -243,7 +270,7 @@ func (s *Store) CreateSyncRun(ctx context.Context, run core.SyncRun, siteID stri
 }
 
 func (s *Store) findConflictingRun(ctx context.Context, run core.SyncRun, siteID string) (core.SyncRun, error) {
-	existing, err := s.getRunWhere(ctx, `idempotency_key = ?`, run.IdempotencyKey)
+	existing, err := s.getRunWhere(ctx, `site_id = ? AND idempotency_key = ?`, siteID, run.IdempotencyKey)
 	if err == nil {
 		return existing, nil
 	}
@@ -252,8 +279,8 @@ func (s *Store) findConflictingRun(ctx context.Context, run core.SyncRun, siteID
 		siteID, run.Provider, string(run.Capability))
 }
 
-func (s *Store) GetSyncRun(ctx context.Context, id string) (core.SyncRun, error) {
-	return s.getRunWhere(ctx, `id = ?`, id)
+func (s *Store) GetSyncRun(ctx context.Context, siteID, id string) (core.SyncRun, error) {
+	return s.getRunWhere(ctx, `site_id = ? AND id = ?`, siteID, id)
 }
 
 func (s *Store) getRunWhere(ctx context.Context, where string, args ...any) (core.SyncRun, error) {
@@ -265,16 +292,16 @@ func (s *Store) getRunWhere(ctx context.Context, where string, args ...any) (cor
 	return scanRun(row)
 }
 
-func (s *Store) ListSyncRuns(ctx context.Context, provider string, limit int) ([]core.SyncRun, error) {
+func (s *Store) ListSyncRuns(ctx context.Context, siteID, provider string, limit int) ([]core.SyncRun, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
 	query := `SELECT id, provider, capability, start_date, end_date, status, rows_synced, cursor,
                triggered_by, idempotency_key, error_code, error_message,
-               started_at, finished_at, created_at, updated_at FROM sync_runs`
-	args := []any{}
+	               started_at, finished_at, created_at, updated_at FROM sync_runs WHERE site_id = ?`
+	args := []any{siteID}
 	if provider != "" {
-		query += ` WHERE provider = ?`
+		query += ` AND provider = ?`
 		args = append(args, provider)
 	}
 	query += ` ORDER BY started_at DESC LIMIT ?`
@@ -358,9 +385,9 @@ func (s *Store) RequeueStaleRuns(ctx context.Context, lease time.Duration) (int6
 
 // UpsertReportRows writes one batch into the generic normalized store. Every
 // row must carry a "_key" string uniquely identifying it within the dataset.
-func (s *Store) UpsertReportRows(ctx context.Context, dataset string, rows []map[string]any) error {
-	if dataset == "" {
-		return fmt.Errorf("dataset is required")
+func (s *Store) UpsertReportRows(ctx context.Context, siteID, dataset string, rows []map[string]any) error {
+	if siteID == "" || dataset == "" {
+		return fmt.Errorf("site and dataset are required")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -378,13 +405,69 @@ func (s *Store) UpsertReportRows(ctx context.Context, dataset string, rows []map
 			return err
 		}
 		if _, err := tx.ExecContext(ctx, `
-            INSERT INTO report_rows (dataset, row_key, data, updated_at) VALUES (?, ?, ?, ?)
-            ON CONFLICT(dataset, row_key) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`,
-			dataset, key, string(data), now); err != nil {
+            INSERT INTO report_rows (site_id, dataset, row_key, data, updated_at) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(site_id, dataset, row_key) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`,
+			siteID, dataset, key, string(data), now); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
+}
+
+type ReportRow struct {
+	Dataset   string
+	Key       string
+	Data      map[string]any
+	UpdatedAt time.Time
+}
+
+func (s *Store) ListReportDatasets(ctx context.Context, siteID string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+        SELECT DISTINCT dataset FROM report_rows WHERE site_id = ? ORDER BY dataset`, siteID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var dataset string
+		if err := rows.Scan(&dataset); err != nil {
+			return nil, err
+		}
+		out = append(out, dataset)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) ListReportRows(ctx context.Context, siteID, dataset string, limit int) ([]ReportRow, error) {
+	if strings.TrimSpace(dataset) == "" {
+		return nil, fmt.Errorf("dataset is required")
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := s.db.QueryContext(ctx, `
+        SELECT dataset, row_key, data, updated_at
+        FROM report_rows WHERE site_id = ? AND dataset = ?
+        ORDER BY row_key DESC LIMIT ?`, siteID, dataset, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ReportRow
+	for rows.Next() {
+		var row ReportRow
+		var raw, updated string
+		if err := rows.Scan(&row.Dataset, &row.Key, &raw, &updated); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(raw), &row.Data); err != nil {
+			return nil, fmt.Errorf("decode report row: %w", err)
+		}
+		row.UpdatedAt, _ = time.Parse(timeLayout, updated)
+		out = append(out, row)
+	}
+	return out, rows.Err()
 }
 
 // SetRunCursor persists a resume checkpoint mid-run.

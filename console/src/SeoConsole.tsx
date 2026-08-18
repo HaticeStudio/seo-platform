@@ -5,6 +5,8 @@ import {
   type Connection,
   type DiscoveredProperty,
   type ProviderDescriptor,
+  type ReportRow,
+  type SiteContext,
   type SyncRun,
 } from './api'
 import './console.css'
@@ -28,24 +30,35 @@ const STATE_LABELS: Record<Connection['state'], string> = {
 
 const REFRESH_MS = 15000
 
-export function SeoConsole({ apiBaseUrl, auth, theme }: SeoConsoleOptions) {
+export function SeoConsole({ apiBaseUrl, auth, theme, locale = 'en' }: SeoConsoleOptions) {
   const client = useMemo(() => new ApiClient(apiBaseUrl, auth), [apiBaseUrl, auth])
   const [providers, setProviders] = useState<ProviderDescriptor[]>([])
+  const [site, setSite] = useState<SiteContext | null>(null)
   const [connections, setConnections] = useState<Connection[]>([])
   const [runs, setRuns] = useState<SyncRun[]>([])
+  const [datasets, setDatasets] = useState<string[]>([])
+  const [selectedDataset, setSelectedDataset] = useState('')
+  const [reportRows, setReportRows] = useState<ReportRow[]>([])
   const [error, setError] = useState('')
   const [busyProvider, setBusyProvider] = useState('')
 
   const refresh = useCallback(async () => {
     try {
-      const [providerData, connectionData, runData] = await Promise.all([
+      const [providerData, siteData, connectionData, runData, datasetData] = await Promise.all([
         client.listProviders(),
+        client.getSite(),
         client.listConnections(),
         client.listSyncRuns(),
+        client.listReportDatasets(),
       ])
       setProviders(providerData.providers)
+      setSite(siteData)
       setConnections(connectionData.connections)
       setRuns(runData.sync_runs)
+      setDatasets(datasetData.datasets)
+      setSelectedDataset((current) =>
+        current && datasetData.datasets.includes(current) ? current : (datasetData.datasets[0] ?? ''),
+      )
       setError('')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'request failed')
@@ -57,6 +70,25 @@ export function SeoConsole({ apiBaseUrl, auth, theme }: SeoConsoleOptions) {
     const timer = setInterval(() => void refresh(), REFRESH_MS)
     return () => clearInterval(timer)
   }, [refresh])
+
+  useEffect(() => {
+    if (!selectedDataset) {
+      setReportRows([])
+      return
+    }
+    let active = true
+    client
+      .listReportRows(selectedDataset)
+      .then((result) => {
+        if (active) setReportRows(result.rows)
+      })
+      .catch((cause) => {
+        if (active) setError(cause instanceof Error ? cause.message : 'loading reports failed')
+      })
+    return () => {
+      active = false
+    }
+  }, [client, selectedDataset, runs])
 
   const triggerSync = useCallback(
     async (provider: string, capability: string) => {
@@ -83,8 +115,9 @@ export function SeoConsole({ apiBaseUrl, auth, theme }: SeoConsoleOptions) {
     : undefined
 
   return (
-    <div className="seo-console" style={style}>
-      {error && <div className="seo-console__error">{error}</div>}
+    <div className="seo-console" style={style} lang={locale} role="region" aria-label="SEO platform console">
+      {error && <div className="seo-console__error" role="alert">{error}</div>}
+      {site && <SetupValues site={site} />}
       <section>
         <h2>Providers</h2>
         <div className="seo-console__cards">
@@ -94,6 +127,7 @@ export function SeoConsole({ apiBaseUrl, auth, theme }: SeoConsoleOptions) {
               client={client}
               provider={provider}
               connection={connections.find((item) => item.provider === provider.name)}
+              oauthCallback={site?.oauth_callback}
               busy={busyProvider === provider.name}
               onSync={triggerSync}
               onChanged={refresh}
@@ -106,6 +140,29 @@ export function SeoConsole({ apiBaseUrl, auth, theme }: SeoConsoleOptions) {
         <h2>Sync runs</h2>
         <SyncRunTable runs={runs} />
       </section>
+      <section>
+        <h2>Reports</h2>
+        {datasets.length > 0 ? (
+          <>
+            <label>
+              Dataset
+              <select
+                value={selectedDataset}
+                onChange={(event) => setSelectedDataset(event.target.value)}
+              >
+                {datasets.map((dataset) => (
+                  <option key={dataset} value={dataset}>
+                    {dataset}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <ReportTable rows={reportRows} />
+          </>
+        ) : (
+          <p>No report data yet. Connect a provider and run a sync.</p>
+        )}
+      </section>
     </div>
   )
 }
@@ -116,6 +173,7 @@ function ProviderCard({
   client,
   provider,
   connection,
+  oauthCallback,
   busy,
   onSync,
   onChanged,
@@ -123,6 +181,7 @@ function ProviderCard({
   client: ApiClient
   provider: ProviderDescriptor
   connection?: Connection
+  oauthCallback?: string
   busy: boolean
   onSync: (provider: string, capability: string) => void
   onChanged: () => Promise<void>
@@ -161,7 +220,7 @@ function ProviderCard({
   const startOAuth = async () => {
     setMessage('')
     try {
-      const redirectUri = `${window.location.origin}/oauth/callback`
+      const redirectUri = oauthCallback ?? `${window.location.origin}/oauth/callback`
       const started = await client.oauthStart(provider.name, redirectUri)
       sessionStorage.setItem(OAUTH_PROVIDER_KEY, provider.name)
       window.location.assign(started.authorize_url)
@@ -219,7 +278,9 @@ function ProviderCard({
           manualTypes={manualTypes}
           oauthAvailable={provider.oauth_available}
           setupUrl={provider.setup_url}
+          setupLinks={provider.setup_links}
           properties={properties}
+          allowManualProperty={Boolean(connection?.configured)}
           onCredential={saveCredential}
           onProperty={chooseProperty}
           onOAuth={startOAuth}
@@ -258,7 +319,9 @@ function ConnectPanel({
   manualTypes,
   oauthAvailable,
   setupUrl,
+  setupLinks,
   properties,
+  allowManualProperty,
   onCredential,
   onProperty,
   onOAuth,
@@ -267,7 +330,9 @@ function ConnectPanel({
   manualTypes: string[]
   oauthAvailable: boolean
   setupUrl?: string
+  setupLinks?: { label: string; url: string }[]
   properties: DiscoveredProperty[]
+  allowManualProperty: boolean
   onCredential: (credentialType: string, material: string) => Promise<void>
   onProperty: (reference: string) => Promise<void>
   onOAuth: () => Promise<void>
@@ -300,14 +365,14 @@ function ConnectPanel({
 
   return (
     <div className="seo-console__connect">
-      {setupUrl && (
-        <p className="seo-console__hint">
-          Credentials are created in the{' '}
-          <a href={setupUrl} target="_blank" rel="noreferrer">
-            provider console
-          </a>
-          .
-        </p>
+      {(setupLinks?.length || setupUrl) && (
+        <div className="seo-console__links" aria-label="Official setup links">
+          {(setupLinks?.length ? setupLinks : [{ label: 'Provider console', url: setupUrl! }]).map((link) => (
+            <a key={link.url} href={link.url} target="_blank" rel="noreferrer">
+              {link.label} <span aria-hidden="true">↗</span>
+            </a>
+          ))}
+        </div>
       )}
       {oauthAvailable && (
         <button onClick={() => void onOAuth()}>Authorize with the provider</button>
@@ -354,10 +419,49 @@ function ConnectPanel({
           </button>
         </>
       )}
+      {allowManualProperty && (
+        <label>
+          Property reference
+          <input
+            value={property}
+            onChange={(event) => setProperty(event.target.value)}
+            placeholder="Enter a property ID or site URL"
+          />
+          <button disabled={!property.trim()} onClick={() => void onProperty(property.trim())}>
+            Test and use this property
+          </button>
+        </label>
+      )}
       <button className="seo-console__ghost" onClick={onClose}>
         Cancel
       </button>
     </div>
+  )
+}
+
+function SetupValues({ site }: { site: SiteContext }) {
+  const values = [
+    ['Public site URL', site.public_url],
+    ['Sitemap URL', site.sitemap_url],
+    ['OAuth callback URL', site.oauth_callback],
+  ]
+  return (
+    <section aria-labelledby="seo-setup-values">
+      <h2 id="seo-setup-values">Setup values</h2>
+      <div className="seo-console__setup-values">
+        {values.map(([label, value]) => (
+          <label key={label}>
+            {label}
+            <span>
+              <input readOnly value={value} aria-label={label} />
+              <button type="button" onClick={() => void navigator.clipboard?.writeText(value)}>
+                Copy
+              </button>
+            </span>
+          </label>
+        ))}
+      </div>
+    </section>
   )
 }
 
@@ -383,14 +487,15 @@ function SyncRunTable({ runs }: { runs: SyncRun[] }) {
   return (
     <div className="seo-console__table-wrap">
       <table>
+        <caption className="seo-console__sr-only">Recent synchronization runs</caption>
         <thead>
           <tr>
-            <th>Provider</th>
-            <th>Capability</th>
-            <th>Range</th>
-            <th>Status</th>
-            <th>Rows</th>
-            <th>Error</th>
+            <th scope="col">Provider</th>
+            <th scope="col">Capability</th>
+            <th scope="col">Range</th>
+            <th scope="col">Status</th>
+            <th scope="col">Rows</th>
+            <th scope="col">Error</th>
           </tr>
         </thead>
         <tbody>
@@ -412,4 +517,42 @@ function SyncRunTable({ runs }: { runs: SyncRun[] }) {
       </table>
     </div>
   )
+}
+
+function ReportTable({ rows }: { rows: ReportRow[] }) {
+  if (rows.length === 0) return <p>This dataset has no rows.</p>
+  const columns = Array.from(
+    new Set(rows.flatMap((row) => Object.keys(row.data).filter((key) => key !== '_key'))),
+  ).slice(0, 12)
+  return (
+    <div className="seo-console__table-wrap">
+      <table>
+        <caption className="seo-console__sr-only">Normalized report rows</caption>
+        <thead>
+          <tr>
+            {columns.map((column) => (
+              <th key={column} scope="col">
+                {column}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.key}>
+              {columns.map((column) => (
+                <td key={column}>{formatCell(row.data[column])}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function formatCell(value: unknown): string {
+  if (value == null) return '—'
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value)
 }

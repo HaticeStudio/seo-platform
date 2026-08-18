@@ -2,6 +2,8 @@ package ga4
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -30,6 +32,13 @@ func (memHandle) Material() core.SecretMaterial {
 	return core.SecretMaterial{Type: "service_account_json", Bytes: []byte("{}")}
 }
 func (memHandle) Close() {}
+
+type oauthHandle struct{ raw []byte }
+
+func (h oauthHandle) Material() core.SecretMaterial {
+	return core.SecretMaterial{Type: "oauth2", Bytes: h.raw}
+}
+func (oauthHandle) Close() {}
 
 type memSink struct{ writes map[string][]map[string]any }
 
@@ -181,5 +190,33 @@ func TestNoHardcodedEventNames(t *testing.T) {
 				t.Fatalf("hardcoded host event leaked into descriptor: %s", dim)
 			}
 		}
+	}
+}
+
+func TestRevokeOAuthRefreshToken(t *testing.T) {
+	var received string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.RawQuery != "" {
+			t.Error("refresh token must not be placed in the URL")
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		received = r.Form.Get("token")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	raw, err := (core.OAuthMaterial{ClientID: "client", TokenURL: "https://token.example.test", RefreshToken: "refresh-secret"}).Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := New()
+	provider.client = server.Client()
+	provider.revokeURL = server.URL
+	if err := provider.Revoke(context.Background(), oauthHandle{raw: raw}); err != nil {
+		t.Fatal(err)
+	}
+	if received != "refresh-secret" {
+		t.Fatalf("revoked token = %q", received)
 	}
 }

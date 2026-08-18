@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -23,6 +24,13 @@ func (memHandle) Material() core.SecretMaterial {
 	return core.SecretMaterial{Type: "service_account_json", Bytes: []byte("{}")}
 }
 func (memHandle) Close() {}
+
+type oauthHandle struct{ raw []byte }
+
+func (h oauthHandle) Material() core.SecretMaterial {
+	return core.SecretMaterial{Type: "oauth2", Bytes: h.raw}
+}
+func (oauthHandle) Close() {}
 
 type memSink struct{ writes map[string][]map[string]any }
 
@@ -60,10 +68,26 @@ func (f *fakeService) ListSites(context.Context) ([]*searchconsole.WmxSite, erro
 	return []*searchconsole.WmxSite{{SiteUrl: "sc-domain:example.test"}}, nil
 }
 
+func (f *fakeService) ListSitemaps(context.Context, string) ([]*searchconsole.WmxSitemap, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return []*searchconsole.WmxSitemap{{Path: "https://example.test/sitemap.xml", Type: "web", Warnings: 1}}, nil
+}
+
+func (f *fakeService) InspectURL(context.Context, string, string) (*searchconsole.InspectUrlIndexResponse, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &searchconsole.InspectUrlIndexResponse{InspectionResult: &searchconsole.UrlInspectionResult{
+		IndexStatusResult: &searchconsole.IndexStatusInspectionResult{Verdict: "PASS", CoverageState: "Submitted and indexed"},
+	}}, nil
+}
+
 func withFake(fake *fakeService) *Provider {
 	return &Provider{newService: func(context.Context, core.CredentialHandle) (service, error) {
 		return fake, nil
-	}}
+	}, client: &http.Client{Timeout: time.Second}, inspectionBatch: 20}
 }
 
 func request() core.SyncRequest {
@@ -156,6 +180,47 @@ func TestDiscoverProperties(t *testing.T) {
 	}
 	if len(properties) != 1 || properties[0].Reference != "sc-domain:example.test" {
 		t.Errorf("properties = %+v", properties)
+	}
+}
+
+func TestRevokeOAuthRefreshToken(t *testing.T) {
+	var received string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.RawQuery != "" {
+			t.Error("refresh token must not be placed in the URL")
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Fatal(err)
+		}
+		received = r.Form.Get("token")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	raw, err := (core.OAuthMaterial{ClientID: "client", TokenURL: "https://token.example.test", RefreshToken: "refresh-secret"}).Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := New()
+	provider.client = server.Client()
+	provider.revokeURL = server.URL
+	if err := provider.Revoke(context.Background(), oauthHandle{raw: raw}); err != nil {
+		t.Fatal(err)
+	}
+	if received != "refresh-secret" {
+		t.Fatalf("revoked token = %q", received)
+	}
+}
+
+func TestSyncSitemaps(t *testing.T) {
+	req := request()
+	req.Capability = core.CapSitemaps
+	sink := newMemSink()
+	result, err := withFake(&fakeService{}).Sync(context.Background(), req, memHandle{}, sink)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Rows != 1 || len(sink.writes[datasetSitemaps]) != 1 {
+		t.Fatalf("sitemap result=%+v rows=%+v", result, sink.writes)
 	}
 }
 

@@ -53,6 +53,14 @@ type Descriptor struct {
 	// creates credentials.
 	SetupURL string
 	DocsURL  string
+	// SetupLinks are labeled, non-secret deep links the Console may render.
+	// SetupURL remains the primary link for compatibility.
+	SetupLinks []SetupLink
+}
+
+type SetupLink struct {
+	Label string
+	URL   string
 }
 
 // Spec returns the declaration for one capability, if the provider has it.

@@ -63,28 +63,72 @@ func (s *Server) setCredential(w http.ResponseWriter, r *http.Request, subject c
 // secret, and returns discovered properties best-effort. Shared by manual
 // credential entry and the OAuth completion path.
 func (s *Server) finishCredentialUpdate(w http.ResponseWriter, r *http.Request, subject core.Subject, provider string, previous core.ProviderConnection, ref core.CredentialRef) {
+	scope := core.Scope{SiteID: s.site.ID, Provider: provider}
+	properties, discoverErr := s.discoverProperties(r.Context(), provider, ref)
+	discoveryMessage := ""
+	var classified *core.SyncError
+	discoveryUnsupported := errors.As(discoverErr, &classified) && classified.Code == core.ErrUnsupported
+	if discoverErr != nil && !discoveryUnsupported {
+		_ = s.secrets.Revoke(context.WithoutCancel(r.Context()), scope, ref)
+		s.audit(r, subject, "connection.credential.set", provider, "validation_failed")
+		writeError(w, http.StatusBadGateway, discoverErr.Error())
+		return
+	}
+	if discoveryUnsupported {
+		discoveryMessage = classified.Message
+	}
+	if previous.PropertyReference != "" {
+		handle, openErr := s.secrets.Open(r.Context(), scope, ref, core.PurposeTest)
+		if openErr != nil {
+			_ = s.secrets.Revoke(context.WithoutCancel(r.Context()), scope, ref)
+			writeError(w, http.StatusConflict, "credential is not available")
+			return
+		}
+		testErr := registeredTest(s.registry, provider, r.Context(), s.site, previous.PropertyReference, handle)
+		handle.Close()
+		if testErr != nil {
+			_ = s.secrets.Revoke(context.WithoutCancel(r.Context()), scope, ref)
+			s.audit(r, subject, "connection.credential.set", provider, "validation_failed")
+			writeError(w, http.StatusBadGateway, publicError(testErr).Error())
+			return
+		}
+	}
 	enabled := previous.PropertyReference != ""
-	if err := s.store.ConfigureConnection(r.Context(), s.site.ID, provider, ref, previous.PropertyReference, enabled); err != nil {
+	swapped, err := s.store.ConfigureConnectionCAS(r.Context(), s.site.ID, provider, previous.CredentialRef, ref, previous.PropertyReference, enabled)
+	if err != nil {
+		_ = s.secrets.Revoke(context.WithoutCancel(r.Context()), scope, ref)
 		s.logger.Error("configure connection", "provider", provider, "error", err)
 		writeError(w, http.StatusInternalServerError, "configure connection")
 		return
 	}
+	if !swapped {
+		_ = s.secrets.Revoke(context.WithoutCancel(r.Context()), scope, ref)
+		writeError(w, http.StatusConflict, "connection changed while the credential was being validated; try again")
+		return
+	}
 	if previous.CredentialRef.ID != "" {
 		// Old material is dead the moment the swap lands.
-		if err := s.secrets.Revoke(context.WithoutCancel(r.Context()), previous.CredentialRef); err != nil {
+		if err := s.secrets.Revoke(context.WithoutCancel(r.Context()), scope, previous.CredentialRef); err != nil {
 			s.logger.Error("revoke replaced credential", "provider", provider, "error", err)
 		}
 	}
 	s.audit(r, subject, "connection.credential.set", provider, "ok")
 
-	properties, discoverErr := s.discoverProperties(r.Context(), provider, ref)
-	response := map[string]any{"configured": true}
-	if discoverErr != nil {
-		response["property_discovery_error"] = discoverErr.Error()
-	} else {
-		response["properties"] = properties
+	response := map[string]any{"configured": true, "properties": properties}
+	if discoveryMessage != "" {
+		response["property_discovery_error"] = discoveryMessage
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func registeredTest(registry interface {
+	Get(string) (core.Provider, bool)
+}, provider string, ctx context.Context, site core.Site, reference string, handle core.CredentialHandle) error {
+	registered, ok := registry.Get(provider)
+	if !ok {
+		return errors.New("unknown provider")
+	}
+	return registered.Test(ctx, site, core.Property{Reference: reference}, handle)
 }
 
 func (s *Server) discoverProperties(ctx context.Context, provider string, ref core.CredentialRef) ([]map[string]string, error) {
@@ -92,7 +136,8 @@ func (s *Server) discoverProperties(ctx context.Context, provider string, ref co
 	if !ok {
 		return nil, errors.New("unknown provider")
 	}
-	handle, err := s.secrets.Open(ctx, ref, core.PurposeTest)
+	scope := core.Scope{SiteID: s.site.ID, Provider: provider}
+	handle, err := s.secrets.Open(ctx, scope, ref, core.PurposeTest)
 	if err != nil {
 		return nil, errors.New("credential is not available")
 	}
@@ -149,6 +194,24 @@ func (s *Server) setProperty(w http.ResponseWriter, r *http.Request, subject cor
 		writeError(w, http.StatusConflict, "set a credential before choosing a property")
 		return
 	}
+	registered, ok := s.registry.Get(provider)
+	if !ok {
+		writeError(w, http.StatusNotFound, "unknown provider")
+		return
+	}
+	scope := core.Scope{SiteID: s.site.ID, Provider: provider}
+	handle, err := s.secrets.Open(r.Context(), scope, connection.CredentialRef, core.PurposeTest)
+	if err != nil {
+		writeError(w, http.StatusConflict, "credential is not available")
+		return
+	}
+	testErr := registered.Test(r.Context(), s.site, core.Property{Reference: reference}, handle)
+	handle.Close()
+	if testErr != nil {
+		s.audit(r, subject, "connection.property.set", provider+"/"+reference, "validation_failed")
+		writeError(w, http.StatusBadGateway, publicError(testErr).Error())
+		return
+	}
 	if err := s.store.ConfigureConnection(r.Context(), s.site.ID, provider, connection.CredentialRef, reference, true); err != nil {
 		writeError(w, http.StatusInternalServerError, "configure connection")
 		return
@@ -169,7 +232,8 @@ func (s *Server) testConnection(w http.ResponseWriter, r *http.Request, subject 
 		writeError(w, http.StatusConflict, "provider is not configured")
 		return
 	}
-	handle, err := s.secrets.Open(r.Context(), connection.CredentialRef, core.PurposeTest)
+	scope := core.Scope{SiteID: s.site.ID, Provider: provider}
+	handle, err := s.secrets.Open(r.Context(), scope, connection.CredentialRef, core.PurposeTest)
 	if err != nil {
 		writeError(w, http.StatusConflict, "credential is not available")
 		return
@@ -202,13 +266,14 @@ func (s *Server) revokeConnection(w http.ResponseWriter, r *http.Request, subjec
 	}
 	if connection.CredentialRef.ID != "" {
 		// Best-effort provider-side revocation first, then the secret dies.
-		if handle, openErr := s.secrets.Open(r.Context(), connection.CredentialRef, core.PurposeRevoke); openErr == nil {
+		scope := core.Scope{SiteID: s.site.ID, Provider: provider}
+		if handle, openErr := s.secrets.Open(r.Context(), scope, connection.CredentialRef, core.PurposeRevoke); openErr == nil {
 			if revokeErr := registered.Revoke(r.Context(), handle); revokeErr != nil {
 				s.logger.Warn("provider-side revoke failed", "provider", provider, "error", revokeErr)
 			}
 			handle.Close()
 		}
-		if err := s.secrets.Revoke(r.Context(), connection.CredentialRef); err != nil {
+		if err := s.secrets.Revoke(r.Context(), scope, connection.CredentialRef); err != nil {
 			s.logger.Error("revoke credential", "provider", provider, "error", err)
 			writeError(w, http.StatusInternalServerError, "revoke credential")
 			return

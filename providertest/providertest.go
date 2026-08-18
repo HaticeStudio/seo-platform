@@ -5,6 +5,7 @@ package providertest
 
 import (
 	"context"
+	"net/url"
 	"sync"
 	"testing"
 
@@ -36,6 +37,12 @@ func RunContract(t *testing.T, p core.Provider) {
 		seen[spec.Capability] = true
 		if spec.MaxRangeDays < 0 || spec.FreshnessLagDays < 0 {
 			t.Fatalf("capability %q declares negative limits", spec.Capability)
+		}
+	}
+	for _, link := range d.SetupLinks {
+		parsed, err := url.Parse(link.URL)
+		if link.Label == "" || err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+			t.Errorf("invalid setup link: %+v", link)
 		}
 	}
 }

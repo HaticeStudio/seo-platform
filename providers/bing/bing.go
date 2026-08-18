@@ -84,6 +84,10 @@ func (p *Provider) Descriptor() core.Descriptor {
 		},
 		SetupURL: "https://www.bing.com/webmasters/settings/apiaccess",
 		DocsURL:  "https://learn.microsoft.com/bing-webmaster-tools/",
+		SetupLinks: []core.SetupLink{
+			{Label: "Bing Webmaster Tools", URL: "https://www.bing.com/webmasters/home"},
+			{Label: "Bing API access", URL: "https://www.bing.com/webmasters/settings/apiaccess"},
+		},
 	}
 }
 
