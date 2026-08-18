@@ -115,6 +115,10 @@ func (e *Engine) Create(ctx context.Context, req CreateRequest) (CreateResult, e
 	if len(key) > 200 {
 		return CreateResult{}, &core.SyncError{Code: core.ErrInternal, Message: "idempotency_key is too long"}
 	}
+	resumeCursor, err := e.store.ResumeCursor(ctx, e.site.ID, req.Provider, string(req.Capability))
+	if err != nil {
+		return CreateResult{}, fmt.Errorf("read sync checkpoint: %w", err)
+	}
 
 	run := core.SyncRun{
 		Provider:       req.Provider,
@@ -123,6 +127,7 @@ func (e *Engine) Create(ctx context.Context, req CreateRequest) (CreateResult, e
 		EndDate:        end,
 		TriggeredBy:    req.TriggeredBy,
 		IdempotencyKey: key,
+		Cursor:         resumeCursor,
 	}
 	created, inserted, err := e.store.CreateSyncRun(ctx, run, e.site.ID)
 	if err != nil {

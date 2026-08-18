@@ -240,15 +240,26 @@ func (c *Client) ReportDatasets(ctx context.Context) ([]string, error) {
 }
 
 func (c *Client) ReportRows(ctx context.Context, dataset string, limit int) ([]ReportRow, error) {
+	rows, _, err := c.ReportRowsPage(ctx, dataset, limit, "")
+	return rows, err
+}
+
+// ReportRowsPage reads one page of a normalized dataset. Pass nextCursor back
+// unchanged; an empty nextCursor means the dataset is exhausted.
+func (c *Client) ReportRowsPage(ctx context.Context, dataset string, limit int, cursor string) ([]ReportRow, string, error) {
 	query := url.Values{"dataset": []string{dataset}}
 	if limit > 0 {
 		query.Set("limit", strconv.Itoa(limit))
 	}
+	if cursor != "" {
+		query.Set("cursor", cursor)
+	}
 	var out struct {
-		Rows []ReportRow `json:"rows"`
+		Rows       []ReportRow `json:"rows"`
+		NextCursor string      `json:"next_cursor"`
 	}
 	err := c.do(ctx, http.MethodGet, "/api/v0/report-rows?"+query.Encode(), nil, &out)
-	return out.Rows, err
+	return out.Rows, out.NextCursor, err
 }
 
 func connectionPath(provider string) string {

@@ -187,6 +187,32 @@ func TestPartialResultKeepsCursorAndSuccessTime(t *testing.T) {
 	}
 }
 
+func TestNextRunResumesPartialCursor(t *testing.T) {
+	f := newFixture(t)
+	f.configure(t)
+	seen := make(chan string, 2)
+	f.fake.SyncFunc = func(_ context.Context, request core.SyncRequest, _ core.CredentialHandle, _ core.SnapshotSink) (core.SyncResult, error) {
+		seen <- request.Cursor
+		if request.Cursor == "" {
+			return core.SyncResult{Rows: 20, Cursor: "page-2"}, &core.SyncError{Code: core.ErrPartial, Message: "more rows remain"}
+		}
+		return core.SyncResult{Rows: 5}, nil
+	}
+	first, err := f.engine.Create(context.Background(), CreateRequest{Provider: fakeProvider, Capability: core.CapSearchPerformance})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, f.store, first.Run.ID, core.SyncPartial)
+	second, err := f.engine.Create(context.Background(), CreateRequest{Provider: fakeProvider, Capability: core.CapSearchPerformance})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, f.store, second.Run.ID, core.SyncSucceeded)
+	if firstCursor, secondCursor := <-seen, <-seen; firstCursor != "" || secondCursor != "page-2" {
+		t.Fatalf("cursors = %q, %q", firstCursor, secondCursor)
+	}
+}
+
 func TestIdempotencyKeyReturnsExistingRun(t *testing.T) {
 	f := newFixture(t)
 	f.configure(t)

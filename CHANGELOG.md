@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.1.1 — 2026-08-18
+
+- Added cursor pagination to normalized report rows so host applications can
+  migrate complete datasets instead of silently stopping at the first page.
+- Resume the last partial provider checkpoint on the next sync run, allowing
+  batched URL Inspection jobs to advance through the complete sitemap.
+
+Migration notes: existing clients remain compatible; integrations that need
+more than one page should continue with `next_cursor` until it is empty.
+
 ## v0.1.0 — 2026-08-18
 
 Initial public release.
