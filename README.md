@@ -53,6 +53,8 @@ curl -H "Authorization: Bearer $API_KEY" http://127.0.0.1:8080/api/v0/providers
 | `SEO_DEV_AUTH` | `false` | Loopback-only no-credential auth for local development |
 | `SEO_GA4_CONVERSION_EVENTS` | (unset) | Comma-separated GA4 event names this deployment counts as conversions |
 | `SEO_CONSOLE_DIR` | (container: `/app/console`) | Serve the built React console from this directory |
+| `SEO_GOOGLE_OAUTH_CLIENT_ID` | (unset) | Google OAuth client for interactive authorization |
+| `SEO_GOOGLE_OAUTH_CLIENT_SECRET` | (unset) | Its secret; used server-side only, never sent to the browser |
 | `SEO_SYNC_LOOKBACK_DAYS` | `30` | Default sync range |
 | `SEO_SYNC_TIMEOUT` | `10m` | Per-run timeout |
 | `SEO_SYNC_INTERVAL` | `24h` | Scheduler interval |

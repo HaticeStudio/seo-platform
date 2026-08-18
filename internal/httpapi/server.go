@@ -23,20 +23,22 @@ import (
 )
 
 type Server struct {
-	store    *store.Store
-	registry *registry.Registry
-	engine   *syncengine.Engine
+	store      *store.Store
+	registry   *registry.Registry
+	engine     *syncengine.Engine
 	auth       auth.Authenticator
+	secrets    core.SecretStore
 	site       core.Site
 	logger     *slog.Logger
 	consoleDir string
+	oauthApps  map[string]OAuthApp
 }
 
-func New(st *store.Store, reg *registry.Registry, engine *syncengine.Engine, authn auth.Authenticator, site core.Site, logger *slog.Logger) *Server {
+func New(st *store.Store, reg *registry.Registry, engine *syncengine.Engine, authn auth.Authenticator, sec core.SecretStore, site core.Site, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{store: st, registry: reg, engine: engine, auth: authn, site: site, logger: logger}
+	return &Server{store: st, registry: reg, engine: engine, auth: authn, secrets: sec, site: site, logger: logger}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -55,6 +57,13 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v0/connections", s.authorized(core.ScopeRead, s.listConnections))
 	mux.Handle("GET /api/v0/sync-runs", s.authorized(core.ScopeRead, s.listSyncRuns))
 	mux.Handle("POST /api/v0/sync-runs", s.authorized(core.ScopeSync, s.createSyncRun))
+	mux.Handle("PUT /api/v0/connections/{provider}/credential", s.authorized(core.ScopeConnectionsManage, s.setCredential))
+	mux.Handle("PUT /api/v0/connections/{provider}/property", s.authorized(core.ScopeConnectionsManage, s.setProperty))
+	mux.Handle("GET /api/v0/connections/{provider}/properties", s.authorized(core.ScopeConnectionsManage, s.listProperties))
+	mux.Handle("POST /api/v0/connections/{provider}/test", s.authorized(core.ScopeConnectionsManage, s.testConnection))
+	mux.Handle("DELETE /api/v0/connections/{provider}", s.authorized(core.ScopeConnectionsManage, s.revokeConnection))
+	mux.Handle("POST /api/v0/connections/{provider}/oauth/start", s.authorized(core.ScopeConnectionsManage, s.oauthStart))
+	mux.Handle("POST /api/v0/connections/{provider}/oauth/complete", s.authorized(core.ScopeConnectionsManage, s.oauthComplete))
 	if s.consoleDir != "" {
 		mux.Handle("GET /", spaHandler(s.consoleDir))
 	}
@@ -109,6 +118,7 @@ type providerJSON struct {
 	Capabilities    []capabilityJSON `json:"capabilities"`
 	SetupURL        string           `json:"setup_url,omitempty"`
 	DocsURL         string           `json:"docs_url,omitempty"`
+	OAuthAvailable  bool             `json:"oauth_available"`
 }
 
 type capabilityJSON struct {
@@ -125,7 +135,8 @@ func (s *Server) listProviders(w http.ResponseWriter, _ *http.Request, _ core.Su
 	descriptors := s.registry.Descriptors()
 	out := make([]providerJSON, 0, len(descriptors))
 	for _, d := range descriptors {
-		p := providerJSON{Name: d.Name, DisplayName: d.DisplayName, CredentialTypes: d.CredentialTypes, SetupURL: d.SetupURL, DocsURL: d.DocsURL}
+		_, oauthAvailable := s.oauthApps[d.Name]
+		p := providerJSON{Name: d.Name, DisplayName: d.DisplayName, CredentialTypes: d.CredentialTypes, SetupURL: d.SetupURL, DocsURL: d.DocsURL, OAuthAvailable: oauthAvailable}
 		for _, c := range d.Capabilities {
 			p.Capabilities = append(p.Capabilities, capabilityJSON{
 				Capability: string(c.Capability), Dimensions: c.Dimensions, Metrics: c.Metrics,

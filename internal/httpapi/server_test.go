@@ -45,7 +45,7 @@ func newTestServer(t *testing.T, subject core.Subject) (*Server, *store.Store, *
 	}
 	sec := secrets.NewMemory()
 	engine := syncengine.NewEngine(st, reg, sec, site, syncengine.Config{}, nil)
-	return New(st, reg, engine, staticAuth{subject}, site, nil), st, sec, site
+	return New(st, reg, engine, staticAuth{subject}, sec, site, nil), st, sec, site
 }
 
 func TestUnauthenticatedRequestsRejected(t *testing.T) {

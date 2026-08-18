@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/HaticeStudio/seo-platform/core"
+	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	analyticsdata "google.golang.org/api/analyticsdata/v1beta"
 	"google.golang.org/api/googleapi"
@@ -88,7 +89,7 @@ func (p *Provider) Descriptor() core.Descriptor {
 	return core.Descriptor{
 		Name:            "google-analytics",
 		DisplayName:     "Google Analytics 4",
-		CredentialTypes: []string{"service_account_json"},
+		CredentialTypes: []string{"oauth2", "service_account_json"},
 		Capabilities:    capabilities,
 		SetupURL:        "https://analytics.google.com/analytics/web/",
 		DocsURL:         "https://developers.google.com/analytics/devguides/reporting/data/v1",
@@ -400,14 +401,29 @@ type googleService struct {
 
 func newGoogleService(ctx context.Context, credential core.CredentialHandle) (service, error) {
 	material := credential.Material()
-	if material.Type != "service_account_json" || len(material.Bytes) == 0 {
-		return nil, &core.SyncError{Code: core.ErrUnauthorized, Message: "a service-account JSON credential is required"}
+	var clientOption option.ClientOption
+	switch material.Type {
+	case "service_account_json":
+		jwtConfig, err := google.JWTConfigFromJSON(material.Bytes, analyticsdata.AnalyticsReadonlyScope)
+		if err != nil {
+			return nil, &core.SyncError{Code: core.ErrUnauthorized, Message: "invalid Google service-account credential"}
+		}
+		clientOption = option.WithHTTPClient(jwtConfig.Client(ctx))
+	case "oauth2":
+		parsed, err := core.ParseOAuthMaterial(material.Bytes)
+		if err != nil {
+			return nil, &core.SyncError{Code: core.ErrUnauthorized, Message: "invalid OAuth credential"}
+		}
+		config := oauth2.Config{
+			ClientID:     parsed.ClientID,
+			ClientSecret: parsed.ClientSecret,
+			Endpoint:     oauth2.Endpoint{TokenURL: parsed.TokenURL},
+		}
+		clientOption = option.WithTokenSource(config.TokenSource(ctx, &oauth2.Token{RefreshToken: parsed.RefreshToken}))
+	default:
+		return nil, &core.SyncError{Code: core.ErrUnauthorized, Message: "an OAuth or service-account credential is required"}
 	}
-	jwtConfig, err := google.JWTConfigFromJSON(material.Bytes, analyticsdata.AnalyticsReadonlyScope)
-	if err != nil {
-		return nil, &core.SyncError{Code: core.ErrUnauthorized, Message: "invalid Google service-account credential"}
-	}
-	svc, err := analyticsdata.NewService(ctx, option.WithHTTPClient(jwtConfig.Client(ctx)), option.WithScopes(analyticsdata.AnalyticsReadonlyScope))
+	svc, err := analyticsdata.NewService(ctx, clientOption, option.WithScopes(analyticsdata.AnalyticsReadonlyScope))
 	if err != nil {
 		return nil, &core.SyncError{Code: core.ErrInternal, Message: "initialize Google Analytics client"}
 	}

@@ -20,6 +20,12 @@ export type ProviderDescriptor = {
   // third-party console paths.
   setup_url?: string
   docs_url?: string
+  oauth_available: boolean
+}
+
+export type DiscoveredProperty = {
+  reference: string
+  display_name: string
 }
 
 export type ConnectionState =
@@ -115,6 +121,59 @@ export class ApiClient {
   listSyncRuns(provider?: string): Promise<{ sync_runs: SyncRun[] }> {
     const query = provider ? `?provider=${encodeURIComponent(provider)}` : ''
     return this.request(`/api/v0/sync-runs${query}`)
+  }
+
+  setCredential(
+    provider: string,
+    credentialType: string,
+    material: string,
+  ): Promise<{ configured: boolean; properties?: DiscoveredProperty[]; property_discovery_error?: string }> {
+    return this.request(`/api/v0/connections/${encodeURIComponent(provider)}/credential`, {
+      method: 'PUT',
+      body: JSON.stringify({ credential_type: credentialType, material }),
+    })
+  }
+
+  setProperty(provider: string, propertyReference: string): Promise<{ configured: boolean }> {
+    return this.request(`/api/v0/connections/${encodeURIComponent(provider)}/property`, {
+      method: 'PUT',
+      body: JSON.stringify({ property_reference: propertyReference }),
+    })
+  }
+
+  listProperties(provider: string): Promise<{ properties: DiscoveredProperty[] }> {
+    return this.request(`/api/v0/connections/${encodeURIComponent(provider)}/properties`)
+  }
+
+  testConnection(provider: string): Promise<{ ok: boolean; error?: string }> {
+    return this.request(`/api/v0/connections/${encodeURIComponent(provider)}/test`, {
+      method: 'POST',
+      body: '{}',
+    })
+  }
+
+  revokeConnection(provider: string): Promise<{ configured: boolean }> {
+    return this.request(`/api/v0/connections/${encodeURIComponent(provider)}`, {
+      method: 'DELETE',
+    })
+  }
+
+  oauthStart(provider: string, redirectUri: string): Promise<{ authorize_url: string; state: string }> {
+    return this.request(`/api/v0/connections/${encodeURIComponent(provider)}/oauth/start`, {
+      method: 'POST',
+      body: JSON.stringify({ redirect_uri: redirectUri }),
+    })
+  }
+
+  oauthComplete(
+    provider: string,
+    state: string,
+    code: string,
+  ): Promise<{ configured: boolean; properties?: DiscoveredProperty[] }> {
+    return this.request(`/api/v0/connections/${encodeURIComponent(provider)}/oauth/complete`, {
+      method: 'POST',
+      body: JSON.stringify({ state, code }),
+    })
   }
 
   createSyncRun(input: {

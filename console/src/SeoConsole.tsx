@@ -3,6 +3,7 @@ import {
   ApiClient,
   type AuthClient,
   type Connection,
+  type DiscoveredProperty,
   type ProviderDescriptor,
   type SyncRun,
 } from './api'
@@ -90,10 +91,12 @@ export function SeoConsole({ apiBaseUrl, auth, theme }: SeoConsoleOptions) {
           {providers.map((provider) => (
             <ProviderCard
               key={provider.name}
+              client={client}
               provider={provider}
               connection={connections.find((item) => item.provider === provider.name)}
               busy={busyProvider === provider.name}
               onSync={triggerSync}
+              onChanged={refresh}
             />
           ))}
           {providers.length === 0 && !error && <p>No providers are installed.</p>}
@@ -107,18 +110,89 @@ export function SeoConsole({ apiBaseUrl, auth, theme }: SeoConsoleOptions) {
   )
 }
 
+export const OAUTH_PROVIDER_KEY = 'seo-console.oauth-provider'
+
 function ProviderCard({
+  client,
   provider,
   connection,
   busy,
   onSync,
+  onChanged,
 }: {
+  client: ApiClient
   provider: ProviderDescriptor
   connection?: Connection
   busy: boolean
   onSync: (provider: string, capability: string) => void
+  onChanged: () => Promise<void>
 }) {
   const state = connection?.state ?? 'not_configured'
+  const [connecting, setConnecting] = useState(false)
+  const [message, setMessage] = useState('')
+  const [properties, setProperties] = useState<DiscoveredProperty[]>([])
+
+  const saveCredential = async (credentialType: string, material: string) => {
+    setMessage('')
+    try {
+      const result = await client.setCredential(provider.name, credentialType, material)
+      setProperties(result.properties ?? [])
+      if (result.property_discovery_error) {
+        setMessage(result.property_discovery_error)
+      }
+      await onChanged()
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : 'saving credential failed')
+    }
+  }
+
+  const chooseProperty = async (reference: string) => {
+    setMessage('')
+    try {
+      await client.setProperty(provider.name, reference)
+      setConnecting(false)
+      setProperties([])
+      await onChanged()
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : 'saving property failed')
+    }
+  }
+
+  const startOAuth = async () => {
+    setMessage('')
+    try {
+      const redirectUri = `${window.location.origin}/oauth/callback`
+      const started = await client.oauthStart(provider.name, redirectUri)
+      sessionStorage.setItem(OAUTH_PROVIDER_KEY, provider.name)
+      window.location.assign(started.authorize_url)
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : 'starting authorization failed')
+    }
+  }
+
+  const test = async () => {
+    setMessage('')
+    try {
+      const result = await client.testConnection(provider.name)
+      setMessage(result.ok ? 'Connection test passed.' : (result.error ?? 'test failed'))
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : 'test failed')
+    }
+  }
+
+  const revoke = async () => {
+    setMessage('')
+    try {
+      await client.revokeConnection(provider.name)
+      setConnecting(false)
+      await onChanged()
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : 'revoke failed')
+    }
+  }
+
+  const manualTypes = provider.credential_types.filter((type) => type !== 'oauth2')
+
   return (
     <article className="seo-console__card">
       <header>
@@ -130,20 +204,6 @@ function ProviderCard({
       {connection?.property_reference && (
         <p className="seo-console__property">{connection.property_reference}</p>
       )}
-      {state === 'not_configured' && (
-        <p className="seo-console__hint">
-          Connect this provider with a {provider.credential_types.join(' or ')}{' '}
-          credential.
-          {provider.setup_url && (
-            <>
-              {' '}
-              <a href={provider.setup_url} target="_blank" rel="noreferrer">
-                Open provider console
-              </a>
-            </>
-          )}
-        </p>
-      )}
       {state === 'error' && connection?.last_error_message && (
         // Provider errors are plain text, never markup (ADR 0005).
         <p className="seo-console__hint seo-console__hint--error">
@@ -153,7 +213,33 @@ function ProviderCard({
       {connection?.data_through_date && (
         <p className="seo-console__hint">Data through {connection.data_through_date}</p>
       )}
+      {message && <p className="seo-console__hint">{message}</p>}
+      {connecting && (
+        <ConnectPanel
+          manualTypes={manualTypes}
+          oauthAvailable={provider.oauth_available}
+          setupUrl={provider.setup_url}
+          properties={properties}
+          onCredential={saveCredential}
+          onProperty={chooseProperty}
+          onOAuth={startOAuth}
+          onClose={() => setConnecting(false)}
+        />
+      )}
       <footer>
+        {!connecting && (
+          <button onClick={() => setConnecting(true)}>
+            {state === 'not_configured' ? 'Connect' : 'Reconfigure'}
+          </button>
+        )}
+        {state !== 'not_configured' && (
+          <>
+            <button onClick={() => void test()}>Test</button>
+            <button className="seo-console__danger" onClick={() => void revoke()}>
+              Revoke
+            </button>
+          </>
+        )}
         {provider.capabilities.map((capability) => (
           <button
             key={capability.capability}
@@ -166,6 +252,128 @@ function ProviderCard({
       </footer>
     </article>
   )
+}
+
+function ConnectPanel({
+  manualTypes,
+  oauthAvailable,
+  setupUrl,
+  properties,
+  onCredential,
+  onProperty,
+  onOAuth,
+  onClose,
+}: {
+  manualTypes: string[]
+  oauthAvailable: boolean
+  setupUrl?: string
+  properties: DiscoveredProperty[]
+  onCredential: (credentialType: string, material: string) => Promise<void>
+  onProperty: (reference: string) => Promise<void>
+  onOAuth: () => Promise<void>
+  onClose: () => void
+}) {
+  const [credentialType, setCredentialType] = useState(manualTypes[0] ?? '')
+  const [material, setMaterial] = useState('')
+  const [property, setProperty] = useState('')
+
+  if (properties.length > 0) {
+    return (
+      <div className="seo-console__connect">
+        <label>
+          Choose a property
+          <select value={property} onChange={(event) => setProperty(event.target.value)}>
+            <option value="">—</option>
+            {properties.map((item) => (
+              <option key={item.reference} value={item.reference}>
+                {item.display_name || item.reference}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button disabled={!property} onClick={() => void onProperty(property)}>
+          Use this property
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="seo-console__connect">
+      {setupUrl && (
+        <p className="seo-console__hint">
+          Credentials are created in the{' '}
+          <a href={setupUrl} target="_blank" rel="noreferrer">
+            provider console
+          </a>
+          .
+        </p>
+      )}
+      {oauthAvailable && (
+        <button onClick={() => void onOAuth()}>Authorize with the provider</button>
+      )}
+      {manualTypes.length > 0 && (
+        <>
+          {manualTypes.length > 1 && (
+            <label>
+              Credential type
+              <select
+                value={credentialType}
+                onChange={(event) => setCredentialType(event.target.value)}
+              >
+                {manualTypes.map((type) => (
+                  <option key={type} value={type}>
+                    {type}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label>
+            Credential
+            <textarea
+              rows={3}
+              value={material}
+              onChange={(event) => setMaterial(event.target.value)}
+              placeholder={
+                credentialType === 'service_account_json'
+                  ? 'Paste the service-account JSON'
+                  : 'Paste the API key'
+              }
+            />
+          </label>
+          <button
+            disabled={!material.trim()}
+            onClick={() => {
+              const value = material
+              setMaterial('')
+              void onCredential(credentialType, value)
+            }}
+          >
+            Save credential
+          </button>
+        </>
+      )}
+      <button className="seo-console__ghost" onClick={onClose}>
+        Cancel
+      </button>
+    </div>
+  )
+}
+
+// completeOAuthCallback finishes an authorization round-trip. Shells call it
+// on their callback route with the query parameters the provider sent back.
+export async function completeOAuthCallback(client: ApiClient): Promise<string> {
+  const params = new URLSearchParams(window.location.search)
+  const state = params.get('state') ?? ''
+  const code = params.get('code') ?? ''
+  const provider = sessionStorage.getItem(OAUTH_PROVIDER_KEY) ?? ''
+  sessionStorage.removeItem(OAUTH_PROVIDER_KEY)
+  if (!state || !code || !provider) {
+    throw new Error('authorization response is incomplete; start again')
+  }
+  await client.oauthComplete(provider, state, code)
+  return provider
 }
 
 function SyncRunTable({ runs }: { runs: SyncRun[] }) {

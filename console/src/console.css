@@ -112,6 +112,37 @@
   cursor: not-allowed;
 }
 
+.seo-console__connect {
+  display: grid;
+  gap: 0.5rem;
+  border-top: 1px dashed #e2e8f0;
+  padding-top: 0.5rem;
+}
+
+.seo-console__connect label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.85rem;
+}
+
+.seo-console__connect select,
+.seo-console__connect textarea {
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  padding: 0.35rem 0.5rem;
+  font: inherit;
+}
+
+.seo-console__card button.seo-console__danger {
+  background: #dc2626;
+}
+
+.seo-console__card button.seo-console__ghost {
+  background: transparent;
+  color: var(--seo-text);
+  border: 1px solid #cbd5e1;
+}
+
 .seo-console__table-wrap {
   overflow-x: auto;
 }

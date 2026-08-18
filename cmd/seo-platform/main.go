@@ -126,7 +126,29 @@ func run(logger *slog.Logger) error {
 	defer stop()
 	go engine.Run(runCtx)
 
-	api := httpapi.New(st, reg, engine, authenticator, site, logger)
+	api := httpapi.New(st, reg, engine, authenticator, secretStore, site, logger)
+	// Google OAuth client for interactive authorization: deployment
+	// configuration, used server-side only. Without it, service-account JSON
+	// and API-key credentials still work through the credential endpoint.
+	if clientID := strings.TrimSpace(os.Getenv("SEO_GOOGLE_OAUTH_CLIENT_ID")); clientID != "" {
+		clientSecret := strings.TrimSpace(os.Getenv("SEO_GOOGLE_OAUTH_CLIENT_SECRET"))
+		if clientSecret == "" {
+			return errors.New("SEO_GOOGLE_OAUTH_CLIENT_ID is set but SEO_GOOGLE_OAUTH_CLIENT_SECRET is empty")
+		}
+		google := func(scopes ...string) httpapi.OAuthApp {
+			return httpapi.OAuthApp{
+				ClientID:     clientID,
+				ClientSecret: clientSecret,
+				AuthURL:      "https://accounts.google.com/o/oauth2/v2/auth",
+				TokenURL:     "https://oauth2.googleapis.com/token",
+				Scopes:       scopes,
+			}
+		}
+		api = api.WithOAuthApps(map[string]httpapi.OAuthApp{
+			"google-search-console": google("https://www.googleapis.com/auth/webmasters.readonly"),
+			"google-analytics":      google("https://www.googleapis.com/auth/analytics.readonly"),
+		})
+	}
 	if consoleDir := strings.TrimSpace(os.Getenv("SEO_CONSOLE_DIR")); consoleDir != "" {
 		if _, statErr := os.Stat(consoleDir); statErr != nil {
 			return fmt.Errorf("SEO_CONSOLE_DIR %q is not readable: %w", consoleDir, statErr)
