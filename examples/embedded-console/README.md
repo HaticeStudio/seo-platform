@@ -1,50 +1,63 @@
-# Embedding the console in a host admin
+# Embed SEO into an existing admin
 
-The console ships as an ES module (`@haticestudio/seo-console`). A host
-renders it inside its own admin shell and supplies a generic `AuthClient` —
-typically forwarding the host's short-lived session token to a
-host-authenticated backend-for-frontend. That server-side adapter checks the
-host permission and adds its seo-platform API key while proxying `/api/v0`.
-The browser and host business database never receive provider credentials.
+The normal integration runs inside the host application. It does not require a
+seo-platform service URL, API key, reverse proxy, or extra deployment.
+
+## Backend
+
+Import `github.com/HaticeStudio/seo-platform/platform`, provide the host's
+existing authentication/RBAC adapter and `core.SecretStore`, then mount the
+handler under the existing admin path:
+
+```go
+seo, err := platform.New(ctx, platform.Config{
+    Site: core.Site{
+        ID: "main",
+        PublicURL: "https://example.com",
+        SitemapURL: "https://example.com/sitemap.xml",
+    },
+    StorePath: "data/seo.db",
+    Secrets: hostSecretStore,
+    Authenticator: platform.AuthenticateFunc(func(r *http.Request) (core.Subject, error) {
+        user, err := hostSession(r)
+        if err != nil || !user.CanManageSEO { return core.Subject{}, errUnauthorized }
+        return core.Subject{
+            ID: user.ID,
+            Scopes: []string{core.ScopeRead, core.ScopeSync, core.ScopeConnectionsManage},
+        }, nil
+    }),
+    Providers: []core.Provider{searchconsole.New(), bing.New(), ga4.New()},
+    OAuthCallbackURL: "https://example.com/admin/seo/oauth/callback",
+})
+if err != nil { return err }
+defer seo.Close()
+go seo.Start(ctx)
+
+router.Handle("/admin/seo/", http.StripPrefix("/admin/seo", seo.Handler()))
+```
+
+## Frontend
+
+The Console uses the host's same-origin cookie/session by default:
 
 ```tsx
-import { SeoConsole, type AuthClient } from '@haticestudio/seo-console'
+import { SeoConsole } from '@haticestudio/seo-console'
 import '@haticestudio/seo-console/style.css'
 
-const auth: AuthClient = {
-  // Exchange the host session for a short-lived seo-platform token.
-  async getAccessToken() {
-    const response = await fetch('/internal/seo-token', { method: 'POST' })
-    const { token } = await response.json()
-    return token
-  },
-  onUnauthorized() {
-    window.location.assign('/login')
-  },
-}
-
 export function SeoAdminPage() {
-  return (
-    <SeoConsole
-      apiBaseUrl="/admin-api/seo-platform"
-      auth={auth}
-			locale="zh-TW"
-      theme={{ accent: '#0f766e' }}
-    />
-  )
+  return <SeoConsole apiBaseUrl="/admin/seo" locale="zh-TW" />
 }
 ```
 
-The proxy must preserve the versioned path and response unchanged. Keep the
-seo-platform service and its API key on a private network; do not put the key
-in JavaScript, HTML, local storage, or a public environment variable.
+On the existing `/admin/seo/oauth/callback` page, finish the provider return
+through the same mounted API and navigate to the server-bound local path:
 
-For OAuth-based provider authorization, set `SEO_BASE_URL` to the public host
-origin, register the exact callback shown in **Setup values**, and proxy the
-callback API requests to seo-platform. On the callback page call
-`completeOAuthCallbackWithResult(client)` and navigate only to its returned
-`returnTo`. The server binds that local return path to the initiating subject,
-site, provider, PKCE verifier, and single-use OAuth state.
+```tsx
+const result = await completeOAuthCallbackWithResult(new ApiClient('/admin/seo'))
+window.location.assign(result.returnTo)
+```
 
-Theme, locale, and routing are presentation settings only; scopes and data
-access are always decided server-side from the authenticated subject.
+If the host already authenticates every API call with a short-lived bearer
+token, it may optionally pass `auth={{ getAccessToken }}`. Provider credentials
+remain write-only and are stored by the server-side `SecretStore` in both
+modes.

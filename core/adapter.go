@@ -23,8 +23,9 @@ type JobState struct {
 // optional in the sense that the whole adapter is — without one, providers,
 // sync, reports, and diagnostics all still work.
 //
-// Adapters run across a process boundary in production (HTTP with allowlisted
-// endpoints, timeouts, and minimal privileges); the core never imports a host.
+// The host supplies this adapter directly when embedding the module. A
+// standalone deployment may choose an HTTP adapter, but the core never assumes
+// a process boundary and never imports a specific host.
 type ProjectAdapter interface {
 	ListCanonicalRoutes(ctx context.Context, site Site) ([]Route, error)
 	TriggerPublish(ctx context.Context, site Site) (JobRef, error)

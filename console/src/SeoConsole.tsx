@@ -15,7 +15,10 @@ import './console.css'
 // Nothing here may influence scopes, site resolution, or query semantics.
 export type SeoConsoleOptions = {
   apiBaseUrl: string
-  auth: AuthClient
+  // Omit auth when the API is mounted in the same host application and uses
+  // its existing cookie/session. Provide it only when the host needs to add a
+  // short-lived bearer token.
+  auth?: AuthClient
   locale?: string
   theme?: Partial<Record<'accent' | 'background' | 'surface' | 'text', string>>
 }
