@@ -1,9 +1,9 @@
 // Standalone shell: same component, an API-key AuthClient. The key is asked
 // for at runtime and kept in sessionStorage only — never embedded in the
 // build or persisted to disk.
-import { StrictMode, useEffect, useState } from 'react'
+import { StrictMode, useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { completeOAuthCallback, SeoConsole } from './SeoConsole'
+import { completeOAuthCallbackWithResult, SeoConsole } from './SeoConsole'
 import { ApiClient, type AuthClient } from './api'
 
 const API_BASE_KEY = 'seo-console.api-base'
@@ -57,18 +57,22 @@ function Shell() {
 }
 
 function AuthedShell({ apiBase, auth }: { apiBase: string; auth: AuthClient }) {
+	const oauthAttempted = useRef(false)
   const [oauthMessage, setOauthMessage] = useState(
     window.location.pathname === '/oauth/callback' ? 'Completing authorization…' : '',
   )
 
   useEffect(() => {
-    if (window.location.pathname !== '/oauth/callback') return
-    completeOAuthCallback(new ApiClient(apiBase, auth))
-      .then((provider) => setOauthMessage(`${provider} authorized.`))
+		if (window.location.pathname !== '/oauth/callback' || oauthAttempted.current) return
+		oauthAttempted.current = true
+    completeOAuthCallbackWithResult(new ApiClient(apiBase, auth))
+      .then((result) => {
+        setOauthMessage(`${result.provider} authorized.`)
+        window.history.replaceState(null, '', result.returnTo)
+      })
       .catch((cause) =>
         setOauthMessage(cause instanceof Error ? cause.message : 'authorization failed'),
       )
-      .finally(() => window.history.replaceState(null, '', '/'))
     // The callback query is consumed exactly once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -76,7 +80,7 @@ function AuthedShell({ apiBase, auth }: { apiBase: string; auth: AuthClient }) {
   return (
     <>
       {oauthMessage && <p style={{ margin: '0.75rem 1.5rem' }}>{oauthMessage}</p>}
-      <SeoConsole apiBaseUrl={apiBase} auth={auth} />
+      <SeoConsole apiBaseUrl={apiBase} auth={auth} locale={navigator.language} />
     </>
   )
 }

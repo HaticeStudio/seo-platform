@@ -20,12 +20,87 @@ export type SeoConsoleOptions = {
   theme?: Partial<Record<'accent' | 'background' | 'surface' | 'text', string>>
 }
 
-const STATE_LABELS: Record<Connection['state'], string> = {
-  not_configured: 'Not configured',
-  error: 'Error',
-  stale: 'Stale',
-  no_data: 'No data yet',
-  connected: 'Connected',
+type DisplayState = Connection['state'] | 'authorizing' | 'syncing'
+
+const COPY = {
+  en: {
+    setupValues: 'Setup values', providers: 'Providers', syncRuns: 'Sync runs', reports: 'Reports',
+    publicURL: 'Public site URL', sitemapURL: 'Sitemap URL', callbackURL: 'OAuth callback URL', copy: 'Copy', copied: 'Copied',
+    states: { not_configured: 'Not configured', reauthorization_required: 'Reauthorization required', error: 'Error', stale: 'Stale', no_data: 'No data yet', connected: 'Connected', authorizing: 'Authorizing', syncing: 'Syncing' } as Record<DisplayState, string>,
+    connect: 'Connect', reconfigure: 'Reconfigure', test: 'Test connection', revoke: 'Disconnect', authorize: 'Authorize with Google',
+    credentialType: 'Credential type', credential: 'Credential', saveCredential: 'Save credential securely', property: 'Property', chooseProperty: 'Choose a property', useProperty: 'Test and use this property', refreshProperties: 'Refresh properties', cancel: 'Close setup',
+    setupGuide: 'Setup guide', officialSteps: 'Open the official consoles below and complete the required steps.', secretNotice: 'Credentials are sent once to the server-side encrypted secret store. They are never returned by the API or saved in browser storage.',
+    oauthPreferred: 'Recommended: authorize with Google OAuth. A service-account JSON remains available for unattended installations.',
+    apiKeyHelp: 'Create a Bing Webmaster API key, then paste it here.', connectedHelp: 'Credential and property are configured. Test the connection, then start the first sync.',
+    selectPropertyHelp: 'Select a property visible to this credential. Property selection also performs a live permission test.',
+    testPassed: 'Connection test passed.', openingProvider: 'Opening provider authorization…', disconnected: 'Provider disconnected.',
+    noProviders: 'No providers are installed.', noRuns: 'No sync runs yet.', noData: 'No report data yet. Connect a provider and run a sync.',
+    dataset: 'Dataset', dataThrough: 'Data through', sync: 'Sync', emptyDataset: 'This dataset has no rows.',
+    recentRuns: 'Recent synchronization runs', normalizedRows: 'Normalized report rows',
+    table: { provider: 'Provider', capability: 'Capability', range: 'Range', status: 'Status', rows: 'Rows', error: 'Error' },
+  },
+  zh: {
+    setupValues: '本網站設定值', providers: '資料來源設定', syncRuns: '同步紀錄', reports: '資料預覽',
+    publicURL: '公開網站網址', sitemapURL: 'Sitemap 網址', callbackURL: 'OAuth 回呼網址', copy: '複製', copied: '已複製',
+    states: { not_configured: '尚未設定', reauthorization_required: '需要重新授權', error: '連線錯誤', stale: '資料過期', no_data: '尚無資料', connected: '已連線', authorizing: '授權中', syncing: '同步中' } as Record<DisplayState, string>,
+    connect: '開始設定', reconfigure: '調整設定', test: '測試連線', revoke: '中斷連線', authorize: '使用 Google 帳號授權',
+    credentialType: '憑證類型', credential: '憑證', saveCredential: '安全儲存憑證', property: 'Property', chooseProperty: '選擇網站／Property', useProperty: '測試並使用這個 Property', refreshProperties: '重新取得 Property', cancel: '關閉設定',
+    setupGuide: '設定引導', officialSteps: '依序開啟下列官方頁面完成設定，完成後回到這裡授權或輸入憑證。', secretNotice: '憑證只會送往後端加密 SecretStore；API 不會回傳，也不會保存在瀏覽器儲存空間。',
+    oauthPreferred: '建議使用 Google OAuth 授權；只有無人值守環境才需要匯入 service-account JSON。',
+    apiKeyHelp: '先到 Bing Webmaster 建立 API Key，再貼到這裡。', connectedHelp: '憑證與 Property 已設定。請測試連線，再執行第一次同步。',
+    selectPropertyHelp: '請選擇這組憑證能存取的 Property；儲存時會同步驗證權限。',
+    testPassed: '連線測試成功。', openingProvider: '正在前往官方授權頁面…', disconnected: '已中斷資料來源連線。',
+    noProviders: '沒有可用的資料來源。', noRuns: '尚無同步紀錄。', noData: '尚無資料；請先完成連線並執行同步。',
+    dataset: '資料集', dataThrough: '資料截至', sync: '同步', emptyDataset: '這個資料集尚無資料。',
+    recentRuns: '最近同步紀錄', normalizedRows: '標準化報表資料',
+    table: { provider: '資料來源', capability: '功能', range: '日期範圍', status: '狀態', rows: '筆數', error: '錯誤' },
+  },
+}
+
+function copyFor(locale: string) {
+  return locale.toLowerCase().startsWith('zh') ? COPY.zh : COPY.en
+}
+
+type ConsoleCopy = ReturnType<typeof copyFor>
+
+function setupLinkLabel(kind: string | undefined, fallback: string, text: ConsoleCopy): string {
+  if (text !== COPY.zh) return fallback
+  return ({
+    console: '開啟官方管理平台',
+    enable_api: '啟用必要 API',
+    credentials: '建立／管理憑證',
+    permissions: '設定網站與帳號權限',
+    sitemaps: '提交 Sitemap',
+  } as Record<string, string>)[kind ?? ''] ?? fallback
+}
+
+function setupLinkDescription(kind: string | undefined, fallback: string | undefined, text: ConsoleCopy): string | undefined {
+  if (text !== COPY.zh) return fallback
+  return ({
+    console: '開啟官方平台，確認網站與資料狀態。',
+    enable_api: '在持有 OAuth 用戶端的 Google Cloud 專案啟用必要 API。',
+    credentials: '建立或管理 OAuth 用戶端、service account 或 API Key。',
+    permissions: '授予登入帳號或 service account 讀取 Property 的權限。',
+    sitemaps: '提交並檢查公開 Sitemap。',
+  } as Record<string, string>)[kind ?? ''] ?? fallback
+}
+
+function connectionDiagnostic(connection: Connection | undefined, text: ConsoleCopy): string {
+  if (!connection || connection.state === 'not_configured') return ''
+  if (connection.state === 'reauthorization_required') {
+    return text === COPY.zh ? '授權已失效或帳號沒有 Property 權限，請重新授權並再次選擇 Property。' : 'Authorization expired or lost property access. Reauthorize and choose the property again.'
+  }
+  if (connection.last_error_code === 'RATE_LIMITED') {
+    return text === COPY.zh ? '已達資料來源配額，系統稍後可重試；不需要重新建立憑證。' : 'The provider quota was reached. Retry later; the credential does not need replacing.'
+  }
+  if (connection.last_error_code === 'TRANSIENT') {
+    return text === COPY.zh ? '資料來源暫時無法使用，請稍後測試連線或重新同步。' : 'The provider is temporarily unavailable. Test or sync again later.'
+  }
+  if (connection.state === 'no_data') return text.connectedHelp
+  if (connection.state === 'stale') {
+    return text === COPY.zh ? '連線仍存在，但資料已過期，請執行同步並檢查最近一次失敗原因。' : 'The connection exists but data is stale. Run a sync and inspect the latest failure.'
+  }
+  return ''
 }
 
 const REFRESH_MS = 15000
@@ -41,6 +116,7 @@ export function SeoConsole({ apiBaseUrl, auth, theme, locale = 'en' }: SeoConsol
   const [reportRows, setReportRows] = useState<ReportRow[]>([])
   const [error, setError] = useState('')
   const [busyProvider, setBusyProvider] = useState('')
+  const text = copyFor(locale)
 
   const refresh = useCallback(async () => {
     try {
@@ -117,9 +193,9 @@ export function SeoConsole({ apiBaseUrl, auth, theme, locale = 'en' }: SeoConsol
   return (
     <div className="seo-console" style={style} lang={locale} role="region" aria-label="SEO platform console">
       {error && <div className="seo-console__error" role="alert">{error}</div>}
-      {site && <SetupValues site={site} />}
+      {site && <SetupValues site={site} text={text} />}
       <section>
-        <h2>Providers</h2>
+        <h2>{text.providers}</h2>
         <div className="seo-console__cards">
           {providers.map((provider) => (
             <ProviderCard
@@ -128,24 +204,26 @@ export function SeoConsole({ apiBaseUrl, auth, theme, locale = 'en' }: SeoConsol
               provider={provider}
               connection={connections.find((item) => item.provider === provider.name)}
               oauthCallback={site?.oauth_callback}
+              runs={runs.filter((run) => run.provider === provider.name)}
+              text={text}
               busy={busyProvider === provider.name}
               onSync={triggerSync}
               onChanged={refresh}
             />
           ))}
-          {providers.length === 0 && !error && <p>No providers are installed.</p>}
+          {providers.length === 0 && !error && <p>{text.noProviders}</p>}
         </div>
       </section>
       <section>
-        <h2>Sync runs</h2>
-        <SyncRunTable runs={runs} />
+        <h2>{text.syncRuns}</h2>
+        <SyncRunTable runs={runs} emptyText={text.noRuns} text={text} />
       </section>
       <section>
-        <h2>Reports</h2>
+        <h2>{text.reports}</h2>
         {datasets.length > 0 ? (
           <>
             <label>
-              Dataset
+              {text.dataset}
               <select
                 value={selectedDataset}
                 onChange={(event) => setSelectedDataset(event.target.value)}
@@ -157,10 +235,10 @@ export function SeoConsole({ apiBaseUrl, auth, theme, locale = 'en' }: SeoConsol
                 ))}
               </select>
             </label>
-            <ReportTable rows={reportRows} />
+            <ReportTable rows={reportRows} text={text} />
           </>
         ) : (
-          <p>No report data yet. Connect a provider and run a sync.</p>
+          <p>{text.noData}</p>
         )}
       </section>
     </div>
@@ -174,6 +252,8 @@ function ProviderCard({
   provider,
   connection,
   oauthCallback,
+  runs,
+  text,
   busy,
   onSync,
   onChanged,
@@ -182,12 +262,15 @@ function ProviderCard({
   provider: ProviderDescriptor
   connection?: Connection
   oauthCallback?: string
+  runs: SyncRun[]
+  text: ConsoleCopy
   busy: boolean
   onSync: (provider: string, capability: string) => void
   onChanged: () => Promise<void>
 }) {
   const state = connection?.state ?? 'not_configured'
   const [connecting, setConnecting] = useState(false)
+  const [authorizing, setAuthorizing] = useState(false)
   const [message, setMessage] = useState('')
   const [properties, setProperties] = useState<DiscoveredProperty[]>([])
 
@@ -219,13 +302,17 @@ function ProviderCard({
 
   const startOAuth = async () => {
     setMessage('')
+    setAuthorizing(true)
     try {
       const redirectUri = oauthCallback ?? `${window.location.origin}/oauth/callback`
-      const started = await client.oauthStart(provider.name, redirectUri)
+      const returnTo = window.location.pathname + window.location.search
+      const started = await client.oauthStart(provider.name, redirectUri, returnTo)
       sessionStorage.setItem(OAUTH_PROVIDER_KEY, provider.name)
+      setMessage(text.openingProvider)
       window.location.assign(started.authorize_url)
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : 'starting authorization failed')
+      setAuthorizing(false)
     }
   }
 
@@ -233,7 +320,7 @@ function ProviderCard({
     setMessage('')
     try {
       const result = await client.testConnection(provider.name)
-      setMessage(result.ok ? 'Connection test passed.' : (result.error ?? 'test failed'))
+      setMessage(result.ok ? text.testPassed : (result.error ?? 'test failed'))
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : 'test failed')
     }
@@ -244,6 +331,7 @@ function ProviderCard({
     try {
       await client.revokeConnection(provider.name)
       setConnecting(false)
+      setMessage(text.disconnected)
       await onChanged()
     } catch (cause) {
       setMessage(cause instanceof Error ? cause.message : 'revoke failed')
@@ -251,13 +339,16 @@ function ProviderCard({
   }
 
   const manualTypes = provider.credential_types.filter((type) => type !== 'oauth2')
+  const syncing = runs.some((run) => run.status === 'QUEUED' || run.status === 'RUNNING')
+  const displayState: DisplayState = authorizing ? 'authorizing' : syncing ? 'syncing' : state
+  const diagnostic = connectionDiagnostic(connection, text)
 
   return (
     <article className="seo-console__card">
       <header>
         <h3>{provider.display_name}</h3>
-        <span className={`seo-console__state seo-console__state--${state}`}>
-          {STATE_LABELS[state]}
+        <span className={`seo-console__state seo-console__state--${displayState}`} aria-live="polite">
+          {text.states[displayState]}
         </span>
       </header>
       {connection?.property_reference && (
@@ -269,8 +360,14 @@ function ProviderCard({
           {connection.last_error_code}: {connection.last_error_message}
         </p>
       )}
+      {state === 'reauthorization_required' && connection?.last_error_message && (
+        <p className="seo-console__hint seo-console__hint--error">
+          {connection.last_error_message}
+        </p>
+      )}
+      {diagnostic && <p className="seo-console__hint">{diagnostic}</p>}
       {connection?.data_through_date && (
-        <p className="seo-console__hint">Data through {connection.data_through_date}</p>
+        <p className="seo-console__hint">{text.dataThrough} {connection.data_through_date}</p>
       )}
       {message && <p className="seo-console__hint">{message}</p>}
       {connecting && (
@@ -281,23 +378,33 @@ function ProviderCard({
           setupLinks={provider.setup_links}
           properties={properties}
           allowManualProperty={Boolean(connection?.configured)}
+          text={text}
           onCredential={saveCredential}
           onProperty={chooseProperty}
           onOAuth={startOAuth}
+          onDiscoverProperties={async () => {
+            setMessage('')
+            try {
+              const result = await client.listProperties(provider.name)
+              setProperties(result.properties)
+            } catch (cause) {
+              setMessage(cause instanceof Error ? cause.message : 'loading properties failed')
+            }
+          }}
           onClose={() => setConnecting(false)}
         />
       )}
       <footer>
         {!connecting && (
           <button onClick={() => setConnecting(true)}>
-            {state === 'not_configured' ? 'Connect' : 'Reconfigure'}
+            {state === 'not_configured' ? text.connect : text.reconfigure}
           </button>
         )}
         {state !== 'not_configured' && (
           <>
-            <button onClick={() => void test()}>Test</button>
+            <button onClick={() => void test()}>{text.test}</button>
             <button className="seo-console__danger" onClick={() => void revoke()}>
-              Revoke
+              {text.revoke}
             </button>
           </>
         )}
@@ -307,7 +414,7 @@ function ProviderCard({
             disabled={busy || state === 'not_configured'}
             onClick={() => onSync(provider.name, capability.capability)}
           >
-            Sync {capability.capability}
+            {text.sync} {capability.capability}
           </button>
         ))}
       </footer>
@@ -322,20 +429,24 @@ function ConnectPanel({
   setupLinks,
   properties,
   allowManualProperty,
+  text,
   onCredential,
   onProperty,
   onOAuth,
+  onDiscoverProperties,
   onClose,
 }: {
   manualTypes: string[]
   oauthAvailable: boolean
   setupUrl?: string
-  setupLinks?: { label: string; url: string }[]
+  setupLinks?: { kind?: string; label: string; url: string; description?: string }[]
   properties: DiscoveredProperty[]
   allowManualProperty: boolean
+  text: ConsoleCopy
   onCredential: (credentialType: string, material: string) => Promise<void>
   onProperty: (reference: string) => Promise<void>
   onOAuth: () => Promise<void>
+  onDiscoverProperties: () => Promise<void>
   onClose: () => void
 }) {
   const [credentialType, setCredentialType] = useState(manualTypes[0] ?? '')
@@ -345,8 +456,10 @@ function ConnectPanel({
   if (properties.length > 0) {
     return (
       <div className="seo-console__connect">
+        <h4>{text.chooseProperty}</h4>
+        <p className="seo-console__hint">{text.selectPropertyHelp}</p>
         <label>
-          Choose a property
+          {text.property}
           <select value={property} onChange={(event) => setProperty(event.target.value)}>
             <option value="">—</option>
             {properties.map((item) => (
@@ -357,7 +470,7 @@ function ConnectPanel({
           </select>
         </label>
         <button disabled={!property} onClick={() => void onProperty(property)}>
-          Use this property
+          {text.useProperty}
         </button>
       </div>
     )
@@ -365,23 +478,40 @@ function ConnectPanel({
 
   return (
     <div className="seo-console__connect">
+      <h4>{text.setupGuide}</h4>
+      <p className="seo-console__hint">{text.officialSteps}</p>
       {(setupLinks?.length || setupUrl) && (
-        <div className="seo-console__links" aria-label="Official setup links">
-          {(setupLinks?.length ? setupLinks : [{ label: 'Provider console', url: setupUrl! }]).map((link) => (
-            <a key={link.url} href={link.url} target="_blank" rel="noreferrer">
-              {link.label} <span aria-hidden="true">↗</span>
-            </a>
-          ))}
-        </div>
+        <ol className="seo-console__links" aria-label="Official setup links">
+          {(setupLinks?.length ? setupLinks : [{ label: 'Provider console', url: setupUrl! }]).map((link) => {
+            const kind = 'kind' in link ? link.kind : undefined
+            const description = setupLinkDescription(
+              kind,
+              'description' in link ? link.description : undefined,
+              text,
+            )
+            return (
+              <li key={link.url}>
+                <a href={link.url} target="_blank" rel="noreferrer">
+                  {setupLinkLabel(kind, link.label, text)} <span aria-hidden="true">↗</span>
+                </a>
+                {description && <span>{description}</span>}
+              </li>
+            )
+          })}
+        </ol>
       )}
       {oauthAvailable && (
-        <button onClick={() => void onOAuth()}>Authorize with the provider</button>
+        <>
+          <p className="seo-console__hint">{text.oauthPreferred}</p>
+          <button onClick={() => void onOAuth()}>{text.authorize}</button>
+        </>
       )}
       {manualTypes.length > 0 && (
         <>
+          {!oauthAvailable && <p className="seo-console__hint">{text.apiKeyHelp}</p>}
           {manualTypes.length > 1 && (
             <label>
-              Credential type
+              {text.credentialType}
               <select
                 value={credentialType}
                 onChange={(event) => setCredentialType(event.target.value)}
@@ -395,11 +525,13 @@ function ConnectPanel({
             </label>
           )}
           <label>
-            Credential
+            {text.credential}
             <textarea
               rows={3}
               value={material}
               onChange={(event) => setMaterial(event.target.value)}
+              autoComplete="off"
+              spellCheck={false}
               placeholder={
                 credentialType === 'service_account_json'
                   ? 'Paste the service-account JSON'
@@ -415,47 +547,54 @@ function ConnectPanel({
               void onCredential(credentialType, value)
             }}
           >
-            Save credential
+            {text.saveCredential}
           </button>
+          <p className="seo-console__hint">{text.secretNotice}</p>
         </>
       )}
       {allowManualProperty && (
-        <label>
-          Property reference
-          <input
-            value={property}
-            onChange={(event) => setProperty(event.target.value)}
-            placeholder="Enter a property ID or site URL"
-          />
+        <div className="seo-console__property-actions">
+          <button type="button" onClick={() => void onDiscoverProperties()}>{text.refreshProperties}</button>
+          <label>
+            {text.property}
+            <input
+              value={property}
+              onChange={(event) => setProperty(event.target.value)}
+              placeholder="Property ID or site URL"
+            />
+          </label>
           <button disabled={!property.trim()} onClick={() => void onProperty(property.trim())}>
-            Test and use this property
+            {text.useProperty}
           </button>
-        </label>
+        </div>
       )}
       <button className="seo-console__ghost" onClick={onClose}>
-        Cancel
+        {text.cancel}
       </button>
     </div>
   )
 }
 
-function SetupValues({ site }: { site: SiteContext }) {
+function SetupValues({ site, text }: { site: SiteContext; text: ConsoleCopy }) {
   const values = [
-    ['Public site URL', site.public_url],
-    ['Sitemap URL', site.sitemap_url],
-    ['OAuth callback URL', site.oauth_callback],
+    [text.publicURL, site.public_url],
+    [text.sitemapURL, site.sitemap_url],
+    [text.callbackURL, site.oauth_callback],
   ]
+  const [copied, setCopied] = useState('')
   return (
     <section aria-labelledby="seo-setup-values">
-      <h2 id="seo-setup-values">Setup values</h2>
+      <h2 id="seo-setup-values">{text.setupValues}</h2>
       <div className="seo-console__setup-values">
         {values.map(([label, value]) => (
           <label key={label}>
             {label}
             <span>
               <input readOnly value={value} aria-label={label} />
-              <button type="button" onClick={() => void navigator.clipboard?.writeText(value)}>
-                Copy
+              <button type="button" aria-label={`${text.copy} ${label}`} onClick={() => {
+                void navigator.clipboard?.writeText(value).then(() => setCopied(label))
+              }}>
+                {copied === label ? text.copied : text.copy}
               </button>
             </span>
           </label>
@@ -467,7 +606,9 @@ function SetupValues({ site }: { site: SiteContext }) {
 
 // completeOAuthCallback finishes an authorization round-trip. Shells call it
 // on their callback route with the query parameters the provider sent back.
-export async function completeOAuthCallback(client: ApiClient): Promise<string> {
+export type OAuthCallbackResult = { provider: string; returnTo: string; properties: DiscoveredProperty[] }
+
+export async function completeOAuthCallbackWithResult(client: ApiClient): Promise<OAuthCallbackResult> {
   const params = new URLSearchParams(window.location.search)
   const state = params.get('state') ?? ''
   const code = params.get('code') ?? ''
@@ -476,26 +617,30 @@ export async function completeOAuthCallback(client: ApiClient): Promise<string> 
   if (!state || !code || !provider) {
     throw new Error('authorization response is incomplete; start again')
   }
-  await client.oauthComplete(provider, state, code)
-  return provider
+  const result = await client.oauthComplete(provider, state, code)
+  return { provider, returnTo: result.return_to || '/', properties: result.properties ?? [] }
 }
 
-function SyncRunTable({ runs }: { runs: SyncRun[] }) {
+export async function completeOAuthCallback(client: ApiClient): Promise<string> {
+  return (await completeOAuthCallbackWithResult(client)).provider
+}
+
+function SyncRunTable({ runs, emptyText, text }: { runs: SyncRun[]; emptyText: string; text: ConsoleCopy }) {
   if (runs.length === 0) {
-    return <p>No sync runs yet.</p>
+    return <p>{emptyText}</p>
   }
   return (
     <div className="seo-console__table-wrap">
       <table>
-        <caption className="seo-console__sr-only">Recent synchronization runs</caption>
+        <caption className="seo-console__sr-only">{text.recentRuns}</caption>
         <thead>
           <tr>
-            <th scope="col">Provider</th>
-            <th scope="col">Capability</th>
-            <th scope="col">Range</th>
-            <th scope="col">Status</th>
-            <th scope="col">Rows</th>
-            <th scope="col">Error</th>
+            <th scope="col">{text.table.provider}</th>
+            <th scope="col">{text.table.capability}</th>
+            <th scope="col">{text.table.range}</th>
+            <th scope="col">{text.table.status}</th>
+            <th scope="col">{text.table.rows}</th>
+            <th scope="col">{text.table.error}</th>
           </tr>
         </thead>
         <tbody>
@@ -519,15 +664,15 @@ function SyncRunTable({ runs }: { runs: SyncRun[] }) {
   )
 }
 
-function ReportTable({ rows }: { rows: ReportRow[] }) {
-  if (rows.length === 0) return <p>This dataset has no rows.</p>
+function ReportTable({ rows, text }: { rows: ReportRow[]; text: ConsoleCopy }) {
+  if (rows.length === 0) return <p>{text.emptyDataset}</p>
   const columns = Array.from(
     new Set(rows.flatMap((row) => Object.keys(row.data).filter((key) => key !== '_key'))),
   ).slice(0, 12)
   return (
     <div className="seo-console__table-wrap">
       <table>
-        <caption className="seo-console__sr-only">Normalized report rows</caption>
+        <caption className="seo-console__sr-only">{text.normalizedRows}</caption>
         <thead>
           <tr>
             {columns.map((column) => (

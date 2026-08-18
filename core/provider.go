@@ -59,8 +59,13 @@ type Descriptor struct {
 }
 
 type SetupLink struct {
-	Label string
-	URL   string
+	// Kind is a stable semantic key (for example "credentials" or
+	// "permissions") that lets Console packages localize the action without
+	// guessing from a provider-specific URL.
+	Kind        string
+	Label       string
+	URL         string
+	Description string
 }
 
 // Spec returns the declaration for one capability, if the provider has it.

@@ -216,6 +216,19 @@ func TestProvidersEndpointExposesDescriptors(t *testing.T) {
 	}
 }
 
+func TestConnectionStateRequiresReauthorizationForUnauthorizedCredential(t *testing.T) {
+	now := time.Now().UTC()
+	state := connectionState(core.ProviderConnection{
+		Enabled:       true,
+		CredentialRef: core.CredentialRef{ID: "opaque", Type: "oauth2"},
+		LastSuccessAt: &now,
+		LastErrorCode: core.ErrUnauthorized,
+	})
+	if state != "reauthorization_required" {
+		t.Fatalf("connection state = %q, want reauthorization_required", state)
+	}
+}
+
 func TestSiteEndpointExposesOnlyNonSecretSetupValues(t *testing.T) {
 	server, _, _, _ := newTestServer(t, core.Subject{ID: "u", Scopes: []string{core.ScopeRead}})
 	server.WithPlatformURL("https://seo.example.test")

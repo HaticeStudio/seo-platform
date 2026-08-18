@@ -23,9 +23,16 @@ different scope is rejected. Rotation validates the replacement before an
 atomic connection swap, and only then revokes the old material.
 
 OAuth state is short-lived, single-use, PKCE protected, and bound to provider,
-site, initiating subject, and a same-origin (or loopback) redirect. Tokens,
+site, initiating subject, a same-origin (or loopback) redirect, and a local
+post-authorization return path. Tokens,
 authorization codes, private keys, and client secrets are excluded from API
 responses, browser storage, audit events, and structured logs.
+
+The standalone runtime authenticates with scoped API keys. Embedded hosts keep
+that key server-side and expose a host-authenticated proxy/BFF to the React
+Console. Host-specific session validation and permission mapping remain in the
+host repository; the public platform receives the already-authorized request
+through this adapter and does not depend on a particular IAM product.
 
 ## Data isolation and failure semantics
 

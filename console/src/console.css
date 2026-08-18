@@ -115,6 +115,17 @@
   color: #b91c1c;
 }
 
+.seo-console__state--reauthorization_required {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.seo-console__state--authorizing,
+.seo-console__state--syncing {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
 .seo-console__state--stale,
 .seo-console__state--no_data {
   background: #fef9c3;
@@ -165,11 +176,26 @@
   padding-top: 0.5rem;
 }
 
+.seo-console__connect h4 {
+  margin: 0.25rem 0 0;
+}
+
 .seo-console__links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem 0.75rem;
+  display: grid;
+  gap: 0.55rem;
+  margin: 0;
+  padding-left: 1.5rem;
   font-size: 0.85rem;
+}
+
+.seo-console__links li {
+  padding-left: 0.2rem;
+}
+
+.seo-console__links li > span {
+  display: block;
+  color: #64748b;
+  margin-top: 0.15rem;
 }
 
 .seo-console__connect label {
@@ -179,11 +205,19 @@
 }
 
 .seo-console__connect select,
-.seo-console__connect textarea {
+.seo-console__connect textarea,
+.seo-console__connect input {
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   padding: 0.35rem 0.5rem;
   font: inherit;
+}
+
+.seo-console__property-actions {
+  display: grid;
+  gap: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px dashed #e2e8f0;
 }
 
 .seo-console__card button.seo-console__danger {
@@ -224,4 +258,27 @@
 
 .seo-console__status--partial {
   color: #854d0e;
+}
+
+@media (max-width: 640px) {
+  .seo-console {
+    padding: 1rem;
+  }
+
+  .seo-console__cards,
+  .seo-console__setup-values {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .seo-console__card header {
+    align-items: flex-start;
+  }
+
+  .seo-console__setup-values label > span {
+    flex-wrap: wrap;
+  }
+
+  .seo-console__setup-values input {
+    flex-basis: 75%;
+  }
 }

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: seo-platform API
-  version: 0.1.1
+  version: 0.2.0
   description: Versioned host-neutral API. Credential material is write-only.
   license:
     name: Apache-2.0
@@ -168,6 +168,9 @@ paths:
               required: [redirect_uri]
               properties:
                 redirect_uri: {type: string, format: uri}
+                return_to:
+                  type: string
+                  description: Local Console path restored after authorization; bound to the single-use state
       responses:
         '200':
           description: Provider authorization URL and opaque single-use state
@@ -302,6 +305,9 @@ components:
               configured: {type: boolean}
               property_reference: {type: string}
               property_discovery_error: {type: string}
+              return_to:
+                type: string
+                description: Local Console path bound to the single-use OAuth state.
               properties: {type: array, items: {$ref: '#/components/schemas/Property'}}
   schemas:
     Property:
@@ -340,6 +346,8 @@ components:
             properties:
               label: {type: string}
               url: {type: string, format: uri}
+              kind: {type: string}
+              description: {type: string}
     Connection:
       type: object
       required: [provider, configured, enabled, state]
@@ -349,7 +357,7 @@ components:
         enabled: {type: boolean}
         credential_type: {type: string}
         property_reference: {type: string}
-        state: {type: string, enum: [not_configured, error, stale, no_data, connected]}
+        state: {type: string, enum: [not_configured, reauthorization_required, error, stale, no_data, connected]}
         last_success_at: {type: string, format: date-time}
         data_through_date: {type: string, format: date}
         last_error_code: {type: string}

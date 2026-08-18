@@ -136,8 +136,10 @@ type providerJSON struct {
 }
 
 type setupLinkJSON struct {
-	Label string `json:"label"`
-	URL   string `json:"url"`
+	Kind        string `json:"kind,omitempty"`
+	Label       string `json:"label"`
+	URL         string `json:"url"`
+	Description string `json:"description,omitempty"`
 }
 
 type capabilityJSON struct {
@@ -157,7 +159,7 @@ func (s *Server) listProviders(w http.ResponseWriter, _ *http.Request, _ core.Su
 		_, oauthAvailable := s.oauthApps[d.Name]
 		p := providerJSON{Name: d.Name, DisplayName: d.DisplayName, CredentialTypes: d.CredentialTypes, SetupURL: d.SetupURL, DocsURL: d.DocsURL, OAuthAvailable: oauthAvailable}
 		for _, link := range d.SetupLinks {
-			p.SetupLinks = append(p.SetupLinks, setupLinkJSON{Label: link.Label, URL: link.URL})
+			p.SetupLinks = append(p.SetupLinks, setupLinkJSON{Kind: link.Kind, Label: link.Label, URL: link.URL, Description: link.Description})
 		}
 		for _, c := range d.Capabilities {
 			p.Capabilities = append(p.Capabilities, capabilityJSON{
@@ -235,6 +237,9 @@ func connectionState(c core.ProviderConnection) string {
 	case !c.Enabled || c.CredentialRef.ID == "":
 		return "not_configured"
 	case c.LastErrorCode != core.ErrNone:
+		if c.LastErrorCode == core.ErrUnauthorized {
+			return "reauthorization_required"
+		}
 		return "error"
 	case c.DataThroughDate != nil && time.Since(*c.DataThroughDate) > 5*24*time.Hour:
 		return "stale"

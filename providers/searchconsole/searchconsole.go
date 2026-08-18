@@ -84,11 +84,11 @@ func (p *Provider) Descriptor() core.Descriptor {
 		SetupURL: "https://search.google.com/search-console",
 		DocsURL:  "https://developers.google.com/webmaster-tools",
 		SetupLinks: []core.SetupLink{
-			{Label: "Search Console", URL: "https://search.google.com/search-console"},
-			{Label: "Enable Search Console API", URL: "https://console.cloud.google.com/apis/library/searchconsole.googleapis.com"},
-			{Label: "Google Cloud credentials", URL: "https://console.cloud.google.com/apis/credentials"},
-			{Label: "Users and permissions", URL: "https://search.google.com/search-console/users"},
-			{Label: "Sitemaps", URL: "https://search.google.com/search-console/sitemaps"},
+			{Kind: "console", Label: "Search Console", URL: "https://search.google.com/search-console", Description: "Verify the site and review indexing data."},
+			{Kind: "enable_api", Label: "Enable Search Console API", URL: "https://console.cloud.google.com/apis/library/searchconsole.googleapis.com", Description: "Enable the API in the Google Cloud project that owns the OAuth client."},
+			{Kind: "credentials", Label: "Google Cloud credentials", URL: "https://console.cloud.google.com/apis/credentials", Description: "Create an OAuth web client or a service-account key."},
+			{Kind: "permissions", Label: "Users and permissions", URL: "https://search.google.com/search-console/users", Description: "Grant the OAuth user or service account access to the property."},
+			{Kind: "sitemaps", Label: "Sitemaps", URL: "https://search.google.com/search-console/sitemaps", Description: "Submit and inspect the public sitemap."},
 		},
 	}
 }
@@ -452,6 +452,13 @@ func classify(err error) error {
 		case apiErr.Code >= 500:
 			return &core.SyncError{Code: core.ErrTransient, Message: "Google API is temporarily unavailable"}
 		}
+	}
+	var retrieveErr *oauth2.RetrieveError
+	if errors.As(err, &retrieveErr) {
+		if retrieveErr.Response != nil && (retrieveErr.Response.StatusCode == http.StatusBadRequest || retrieveErr.Response.StatusCode == http.StatusUnauthorized) {
+			return &core.SyncError{Code: core.ErrUnauthorized, Message: "Google OAuth authorization expired or was revoked"}
+		}
+		return &core.SyncError{Code: core.ErrTransient, Message: "Google OAuth token refresh failed"}
 	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return &core.SyncError{Code: core.ErrTransient, Message: "Google API request timed out"}

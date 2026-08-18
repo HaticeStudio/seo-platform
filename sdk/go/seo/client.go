@@ -69,8 +69,10 @@ type Provider struct {
 }
 
 type SetupLink struct {
-	Label string `json:"label"`
-	URL   string `json:"url"`
+	Kind        string `json:"kind,omitempty"`
+	Label       string `json:"label"`
+	URL         string `json:"url"`
+	Description string `json:"description,omitempty"`
 }
 
 type Site struct {
@@ -179,20 +181,30 @@ func (c *Client) RevokeConnection(ctx context.Context, provider string) error {
 }
 
 func (c *Client) StartOAuth(ctx context.Context, provider, redirectURI string) (authorizeURL, state string, err error) {
+	return c.StartOAuthWithReturn(ctx, provider, redirectURI, "/")
+}
+
+func (c *Client) StartOAuthWithReturn(ctx context.Context, provider, redirectURI, returnTo string) (authorizeURL, state string, err error) {
 	var out struct {
 		AuthorizeURL string `json:"authorize_url"`
 		State        string `json:"state"`
 	}
-	err = c.do(ctx, http.MethodPost, connectionPath(provider)+"/oauth/start", map[string]string{"redirect_uri": redirectURI}, &out)
+	err = c.do(ctx, http.MethodPost, connectionPath(provider)+"/oauth/start", map[string]string{"redirect_uri": redirectURI, "return_to": returnTo}, &out)
 	return out.AuthorizeURL, out.State, err
 }
 
 func (c *Client) CompleteOAuth(ctx context.Context, provider, state, code string) ([]Property, error) {
+	properties, _, err := c.CompleteOAuthWithReturn(ctx, provider, state, code)
+	return properties, err
+}
+
+func (c *Client) CompleteOAuthWithReturn(ctx context.Context, provider, state, code string) ([]Property, string, error) {
 	var out struct {
 		Properties []Property `json:"properties"`
+		ReturnTo   string     `json:"return_to"`
 	}
 	err := c.do(ctx, http.MethodPost, connectionPath(provider)+"/oauth/complete", map[string]string{"state": state, "code": code}, &out)
-	return out.Properties, err
+	return out.Properties, out.ReturnTo, err
 }
 
 func (c *Client) SyncRuns(ctx context.Context, provider string, limit int) ([]SyncRun, error) {

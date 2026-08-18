@@ -56,13 +56,13 @@ func (s *Server) setCredential(w http.ResponseWriter, r *http.Request, subject c
 		writeError(w, http.StatusInternalServerError, "store credential")
 		return
 	}
-	s.finishCredentialUpdate(w, r, subject, provider, connection, ref)
+	s.finishCredentialUpdate(w, r, subject, provider, connection, ref, nil)
 }
 
 // finishCredentialUpdate swaps the connection to ref, revokes the previous
 // secret, and returns discovered properties best-effort. Shared by manual
 // credential entry and the OAuth completion path.
-func (s *Server) finishCredentialUpdate(w http.ResponseWriter, r *http.Request, subject core.Subject, provider string, previous core.ProviderConnection, ref core.CredentialRef) {
+func (s *Server) finishCredentialUpdate(w http.ResponseWriter, r *http.Request, subject core.Subject, provider string, previous core.ProviderConnection, ref core.CredentialRef, extra map[string]any) {
 	scope := core.Scope{SiteID: s.site.ID, Provider: provider}
 	properties, discoverErr := s.discoverProperties(r.Context(), provider, ref)
 	discoveryMessage := ""
@@ -115,6 +115,9 @@ func (s *Server) finishCredentialUpdate(w http.ResponseWriter, r *http.Request, 
 	s.audit(r, subject, "connection.credential.set", provider, "ok")
 
 	response := map[string]any{"configured": true, "properties": properties}
+	for key, value := range extra {
+		response[key] = value
+	}
 	if discoveryMessage != "" {
 		response["property_discovery_error"] = discoveryMessage
 	}

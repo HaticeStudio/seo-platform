@@ -3,9 +3,11 @@
 // in standalone.tsx is just another consumer of this same export.
 export {
   completeOAuthCallback,
+  completeOAuthCallbackWithResult,
   OAUTH_PROVIDER_KEY,
   SeoConsole,
   type SeoConsoleOptions,
+  type OAuthCallbackResult,
 } from './SeoConsole'
 export {
   ApiClient,

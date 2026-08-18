@@ -96,9 +96,9 @@ func (p *Provider) Descriptor() core.Descriptor {
 		SetupURL:        "https://analytics.google.com/analytics/web/",
 		DocsURL:         "https://developers.google.com/analytics/devguides/reporting/data/v1",
 		SetupLinks: []core.SetupLink{
-			{Label: "Google Analytics", URL: "https://analytics.google.com/analytics/web/"},
-			{Label: "Google Analytics Admin", URL: "https://analytics.google.com/analytics/web/#/a/admin"},
-			{Label: "Google Cloud credentials", URL: "https://console.cloud.google.com/apis/credentials"},
+			{Kind: "console", Label: "Google Analytics", URL: "https://analytics.google.com/analytics/web/", Description: "Open reports for the selected property."},
+			{Kind: "permissions", Label: "Google Analytics Admin", URL: "https://analytics.google.com/analytics/web/#/a/admin", Description: "Grant the OAuth user or service account read access."},
+			{Kind: "credentials", Label: "Google Cloud credentials", URL: "https://console.cloud.google.com/apis/credentials", Description: "Create the OAuth web client used by this deployment."},
 		},
 	}
 }
@@ -419,6 +419,13 @@ func classify(err error) error {
 		case apiErr.Code >= 500:
 			return &core.SyncError{Code: core.ErrTransient, Message: "Google API is temporarily unavailable"}
 		}
+	}
+	var retrieveErr *oauth2.RetrieveError
+	if errors.As(err, &retrieveErr) {
+		if retrieveErr.Response != nil && (retrieveErr.Response.StatusCode == http.StatusBadRequest || retrieveErr.Response.StatusCode == http.StatusUnauthorized) {
+			return &core.SyncError{Code: core.ErrUnauthorized, Message: "Google OAuth authorization expired or was revoked"}
+		}
+		return &core.SyncError{Code: core.ErrTransient, Message: "Google OAuth token refresh failed"}
 	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return &core.SyncError{Code: core.ErrTransient, Message: "Google API request timed out"}
