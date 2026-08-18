@@ -64,7 +64,11 @@ describe('SeoConsole', () => {
 				headers: { 'Content-Type': 'application/json' },
 			})
 		}
-        const body = responses[url.pathname + url.search]
+        let responsePath = url.pathname + url.search
+        if (responsePath.startsWith('/admin/seo/')) {
+          responsePath = responsePath.slice('/admin/seo'.length)
+        }
+        const body = responses[responsePath]
         return new Response(JSON.stringify(body ?? { error: 'not found' }), {
           status: body ? 200 : 404,
           headers: { 'Content-Type': 'application/json' },
@@ -109,6 +113,17 @@ describe('SeoConsole', () => {
       rules: { 'color-contrast': { enabled: false } },
     })
     expect(accessibility.violations).toEqual([])
+  })
+
+  it('uses the host same-origin session when no auth client is provided', async () => {
+    render(<SeoConsole apiBaseUrl="/admin/seo" />)
+
+    expect(await screen.findByText('Fake Search')).toBeTruthy()
+    for (const call of vi.mocked(fetch).mock.calls) {
+      expect(call[1]?.credentials).toBe('same-origin')
+      const headers = new Headers(call[1]?.headers)
+      expect(headers.has('Authorization')).toBe(false)
+    }
   })
 
 	it('guides a Traditional Chinese administrator through secure credential and property setup', async () => {

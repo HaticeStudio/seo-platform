@@ -62,7 +62,7 @@ func (s *Server) oauthStart(w http.ResponseWriter, r *http.Request, subject core
 		writeError(w, http.StatusBadRequest, "redirect_uri must be absolute and https (or loopback)")
 		return
 	}
-	expectedCallback := strings.TrimRight(s.platformURL, "/") + "/oauth/callback"
+	expectedCallback := s.oauthCallbackURL
 	if redirect.String() != expectedCallback {
 		writeError(w, http.StatusBadRequest, "redirect_uri must match the configured OAuth callback")
 		return

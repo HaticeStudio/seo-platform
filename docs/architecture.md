@@ -1,16 +1,20 @@
 # Architecture and trust boundaries
 
-seo-platform is standalone-first. Its default deployment represents one
-public site and requires no tenant system, identity vendor, private gateway,
-or host-specific domain model.
+seo-platform is embed-first. Its default integration is a Go package mounted
+inside an existing backend plus a React package rendered inside the existing
+admin shell. It requires no second runtime service, domain, API key, gateway,
+or data replication layer.
 
 ## Public boundaries
 
 - Providers implement `core.Provider` and declare only capabilities their
   upstream API actually supports.
-- The server exposes `/api/v0`; its contract is `api/openapi.yaml`.
-- Go hosts use `sdk/go/seo`. React hosts use the Console package and provide an
-  `AuthClient` which returns a short-lived platform access token.
+- Go hosts import `platform`, provide their host authenticator and secret
+  store, and mount its `/api/v0` handler under an existing path.
+- React hosts use the Console package with the same-origin host session.
+  `AuthClient` is optional when the host already uses short-lived bearer auth.
+- The SDK is for optional remote/standalone integrations, not the normal
+  in-process path.
 - A host-specific identity or routing adapter belongs in the host repository,
   never in this repository.
 
@@ -28,11 +32,10 @@ post-authorization return path. Tokens,
 authorization codes, private keys, and client secrets are excluded from API
 responses, browser storage, audit events, and structured logs.
 
-The standalone runtime authenticates with scoped API keys. Embedded hosts keep
-that key server-side and expose a host-authenticated proxy/BFF to the React
-Console. Host-specific session validation and permission mapping remain in the
-host repository; the public platform receives the already-authorized request
-through this adapter and does not depend on a particular IAM product.
+Embedded hosts pass their existing authenticated session through a public
+`platform.Authenticator`, which maps the host user to generic SEO scopes. There
+is no platform API key and no BFF. The standalone example alone uses scoped API
+keys because it has no host login system.
 
 ## Data isolation and failure semantics
 
@@ -44,6 +47,6 @@ synced data is never represented as invented zero-valued data.
 
 ## Release boundary
 
-Tagged releases publish source archives, platform binaries, Console assets,
-checksums, and a multi-architecture container image with provenance and SBOM.
+Tagged releases publish the Go module, Console package, optional standalone
+binaries, checksums, and an optional multi-architecture container image.
 Publishing a release does not deploy or modify any downstream environment.

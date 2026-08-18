@@ -24,23 +24,27 @@ import (
 )
 
 type Server struct {
-	store       *store.Store
-	registry    *registry.Registry
-	engine      *syncengine.Engine
-	auth        auth.Authenticator
-	secrets     core.SecretStore
-	site        core.Site
-	logger      *slog.Logger
-	consoleDir  string
-	oauthApps   map[string]OAuthApp
-	platformURL string
+	store            *store.Store
+	registry         *registry.Registry
+	engine           *syncengine.Engine
+	auth             auth.Authenticator
+	secrets          core.SecretStore
+	site             core.Site
+	logger           *slog.Logger
+	consoleDir       string
+	oauthApps        map[string]OAuthApp
+	oauthCallbackURL string
 }
 
 func New(st *store.Store, reg *registry.Registry, engine *syncengine.Engine, authn auth.Authenticator, sec core.SecretStore, site core.Site, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{store: st, registry: reg, engine: engine, auth: authn, secrets: sec, site: site, logger: logger, platformURL: site.PublicURL}
+	return &Server{
+		store: st, registry: reg, engine: engine, auth: authn, secrets: sec,
+		site: site, logger: logger,
+		oauthCallbackURL: strings.TrimRight(site.PublicURL, "/") + "/oauth/callback",
+	}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -75,11 +79,19 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// WithPlatformURL sets the public origin that owns the OAuth callback. It is
-// separate from the analyzed site's public URL because deployments commonly
-// run the Console on an admin subdomain.
+// WithPlatformURL keeps the standalone configuration contract. Embedded hosts
+// should use WithOAuthCallbackURL with their exact existing admin path.
 func (s *Server) WithPlatformURL(publicURL string) *Server {
-	s.platformURL = strings.TrimRight(publicURL, "/")
+	s.oauthCallbackURL = strings.TrimRight(publicURL, "/") + "/oauth/callback"
+	return s
+}
+
+// WithOAuthCallbackURL sets the exact public callback URL registered with the
+// provider. Embedded hosts normally point this at an existing admin path, for
+// example https://example.com/admin/seo/oauth/callback. No separate origin is
+// required.
+func (s *Server) WithOAuthCallbackURL(callbackURL string) *Server {
+	s.oauthCallbackURL = strings.TrimSpace(callbackURL)
 	return s
 }
 
@@ -177,7 +189,7 @@ func (s *Server) getSite(w http.ResponseWriter, _ *http.Request, _ core.Subject)
 	writeJSON(w, http.StatusOK, map[string]string{
 		"public_url":     s.site.PublicURL,
 		"sitemap_url":    s.site.SitemapURL,
-		"oauth_callback": strings.TrimRight(s.platformURL, "/") + "/oauth/callback",
+		"oauth_callback": s.oauthCallbackURL,
 	})
 }
 

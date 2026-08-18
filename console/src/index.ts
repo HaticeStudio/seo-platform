@@ -1,6 +1,6 @@
 // Public entry of the embeddable package. Hosts render <SeoConsole/> inside
-// their own admin shell and supply a generic AuthClient; the standalone shell
-// in standalone.tsx is just another consumer of this same export.
+// their own admin shell. Same-origin host sessions work without an AuthClient;
+// the standalone shell in standalone.tsx is just another consumer.
 export {
   completeOAuthCallback,
   completeOAuthCallbackWithResult,

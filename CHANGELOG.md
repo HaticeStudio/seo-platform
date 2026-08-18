@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.3.0 — 2026-08-19
+
+- Corrected the integration model from standalone-first to embed-first.
+- Added the public `platform` Go runtime so a host can mount SEO APIs in its
+  existing process and reuse its session/RBAC without a platform API key.
+- Made the React Console use same-origin host authentication by default while
+  retaining optional short-lived bearer-token support.
+- Added exact host-path OAuth callbacks and public secret-store helpers.
+- Kept the standalone binary and container as optional examples.
+
 ## v0.2.0 — 2026-08-19
 
 - Added a responsive English and Traditional Chinese guided setup Console with

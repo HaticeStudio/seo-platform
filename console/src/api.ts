@@ -80,7 +80,7 @@ export type ReportRow = {
 // AuthClient supplies short-lived access tokens only. It never sees provider
 // credentials.
 export type AuthClient = {
-  getAccessToken(): Promise<string>
+  getAccessToken(): Promise<string | undefined>
   onUnauthorized?(): void
 }
 
@@ -96,21 +96,21 @@ export class ApiError extends Error {
 export class ApiClient {
   constructor(
     private readonly baseUrl: string,
-    private readonly auth: AuthClient,
+    private readonly auth?: AuthClient,
   ) {}
 
   private async request<T>(path: string, init?: RequestInit): Promise<T> {
-    const token = await this.auth.getAccessToken()
+    const token = await this.auth?.getAccessToken()
+    const headers = new Headers(init?.headers)
+    if (token) headers.set('Authorization', `Bearer ${token}`)
+    if (init?.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json')
     const response = await fetch(this.baseUrl.replace(/\/$/, '') + path, {
       ...init,
-      headers: {
-        ...init?.headers,
-        Authorization: `Bearer ${token}`,
-        ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
-      },
+      credentials: init?.credentials ?? 'same-origin',
+      headers,
     })
     if (response.status === 401) {
-      this.auth.onUnauthorized?.()
+      this.auth?.onUnauthorized?.()
     }
     if (!response.ok) {
       let message = `request failed (${response.status})`
