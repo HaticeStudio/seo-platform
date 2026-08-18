@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"sort"
@@ -250,11 +251,11 @@ func (s *Store) CreateSyncRun(ctx context.Context, run core.SyncRun, siteID stri
 	run.UpdatedAt = now
 	_, err := s.db.ExecContext(ctx, `
         INSERT INTO sync_runs (id, provider, site_id, capability, start_date, end_date, status,
-            triggered_by, idempotency_key, started_at, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            cursor, triggered_by, idempotency_key, started_at, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		run.ID, run.Provider, siteID, string(run.Capability),
 		run.StartDate.Format(dateLayout), run.EndDate.Format(dateLayout), string(run.Status),
-		run.TriggeredBy, run.IdempotencyKey,
+		run.Cursor, run.TriggeredBy, run.IdempotencyKey,
 		now.Format(timeLayout), now.Format(timeLayout), now.Format(timeLayout))
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -497,6 +498,26 @@ func (s *Store) SetRunCursor(ctx context.Context, id, cursor string) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE sync_runs SET cursor = ?, updated_at = ? WHERE id = ?`,
 		cursor, time.Now().UTC().Format(timeLayout), id)
 	return err
+}
+
+// ResumeCursor returns the checkpoint from the most recent partial run. A
+// successful or failed run deliberately clears the continuation boundary.
+func (s *Store) ResumeCursor(ctx context.Context, siteID, provider, capability string) (string, error) {
+	var cursor, status string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT cursor, status FROM sync_runs
+		WHERE site_id = ? AND provider = ? AND capability = ?
+		ORDER BY started_at DESC LIMIT 1`, siteID, provider, capability).Scan(&cursor, &status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if status != string(core.SyncPartial) {
+		return "", nil
+	}
+	return cursor, nil
 }
 
 func (s *Store) AppendAudit(ctx context.Context, event core.AuditEvent) error {
