@@ -1,6 +1,6 @@
 {
   "name": "@haticestudio/seo-console",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "React console for seo-platform: standalone app and embeddable package",
   "license": "Apache-2.0",
   "type": "module",
