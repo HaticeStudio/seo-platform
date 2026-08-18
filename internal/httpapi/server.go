@@ -309,7 +309,8 @@ func (s *Server) listReportRows(w http.ResponseWriter, r *http.Request, _ core.S
 		return
 	}
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	rows, err := s.store.ListReportRows(r.Context(), s.site.ID, dataset, limit)
+	after := r.URL.Query().Get("cursor")
+	rows, nextCursor, err := s.store.ListReportRowsPage(r.Context(), s.site.ID, dataset, limit, after)
 	if err != nil {
 		s.logger.Error("list report rows", "dataset", dataset, "error", err)
 		writeError(w, http.StatusInternalServerError, "list report rows")
@@ -325,7 +326,7 @@ func (s *Server) listReportRows(w http.ResponseWriter, r *http.Request, _ core.S
 	for _, row := range rows {
 		out = append(out, reportRowJSON{Dataset: row.Dataset, Key: row.Key, Data: row.Data, UpdatedAt: row.UpdatedAt.UTC().Format(time.RFC3339)})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"rows": out})
+	writeJSON(w, http.StatusOK, map[string]any{"rows": out, "next_cursor": nextCursor})
 }
 
 type createSyncRunJSON struct {

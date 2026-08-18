@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -88,6 +89,48 @@ func TestReportRowsAreReadableAndSiteScoped(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `"clicks":4`) || strings.Contains(rec.Body.String(), `"clicks":99`) {
 		t.Fatalf("site scope leaked: %s", rec.Body.String())
+	}
+}
+
+func TestReportRowsCanBeReadWithoutTruncation(t *testing.T) {
+	server, st, _, site := newTestServer(t, core.Subject{ID: "u", Scopes: []string{core.ScopeRead}})
+	ctx := context.Background()
+	if err := st.UpsertReportRows(ctx, site.ID, "search/daily", []map[string]any{
+		{"_key": "c", "clicks": 3},
+		{"_key": "b", "clicks": 2},
+		{"_key": "a", "clicks": 1},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	first := do(t, server, "GET", "/api/v0/report-rows?dataset=search%2Fdaily&limit=2", "")
+	if first.Code != http.StatusOK {
+		t.Fatalf("first page: %d %s", first.Code, first.Body.String())
+	}
+	var firstPage struct {
+		Rows       []map[string]any `json:"rows"`
+		NextCursor string           `json:"next_cursor"`
+	}
+	if err := json.Unmarshal(first.Body.Bytes(), &firstPage); err != nil {
+		t.Fatal(err)
+	}
+	if len(firstPage.Rows) != 2 || firstPage.NextCursor != "b" {
+		t.Fatalf("first page = %#v", firstPage)
+	}
+
+	second := do(t, server, "GET", "/api/v0/report-rows?dataset=search%2Fdaily&limit=2&cursor="+url.QueryEscape(firstPage.NextCursor), "")
+	if second.Code != http.StatusOK {
+		t.Fatalf("second page: %d %s", second.Code, second.Body.String())
+	}
+	var secondPage struct {
+		Rows       []map[string]any `json:"rows"`
+		NextCursor string           `json:"next_cursor"`
+	}
+	if err := json.Unmarshal(second.Body.Bytes(), &secondPage); err != nil {
+		t.Fatal(err)
+	}
+	if len(secondPage.Rows) != 1 || secondPage.NextCursor != "" || secondPage.Rows[0]["key"] != "a" {
+		t.Fatalf("second page = %#v", secondPage)
 	}
 }
 

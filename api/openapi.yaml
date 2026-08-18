@@ -260,6 +260,7 @@ paths:
       parameters:
         - {name: dataset, in: query, required: true, schema: {type: string}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 1000}}
+        - {name: cursor, in: query, description: Opaque next_cursor from the previous page, schema: {type: string}}
       responses:
         '200':
           description: Site-scoped rows for one normalized dataset
@@ -267,9 +268,10 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [rows]
+                required: [rows, next_cursor]
                 properties:
                   rows: {type: array, items: {$ref: '#/components/schemas/ReportRow'}}
+                  next_cursor: {type: string, description: Empty on the final page}
         '400': {$ref: '#/components/responses/Error'}
 components:
   securitySchemes:

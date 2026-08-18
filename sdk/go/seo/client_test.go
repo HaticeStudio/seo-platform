@@ -55,3 +55,28 @@ func TestNewRejectsUnsafeConfiguration(t *testing.T) {
 		t.Fatal("nil token source accepted")
 	}
 }
+
+func TestReportRowsPageSendsAndReturnsCursor(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("dataset"); got != "search/details" {
+			t.Errorf("dataset = %q", got)
+		}
+		if got := r.URL.Query().Get("cursor"); got != "next|row" {
+			t.Errorf("cursor = %q", got)
+		}
+		if got := r.URL.Query().Get("limit"); got != "500" {
+			t.Errorf("limit = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"rows":[{"dataset":"search/details","key":"a","data":{"clicks":1}}],"next_cursor":"last"}`))
+	}))
+	defer server.Close()
+	client, _ := New(server.URL, func(context.Context) (string, error) { return "token", nil }, server.Client())
+	rows, next, err := client.ReportRowsPage(context.Background(), "search/details", 500, "next|row")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].Key != "a" || next != "last" {
+		t.Fatalf("rows=%#v next=%q", rows, next)
+	}
+}

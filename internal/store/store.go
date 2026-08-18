@@ -440,18 +440,32 @@ func (s *Store) ListReportDatasets(ctx context.Context, siteID string) ([]string
 }
 
 func (s *Store) ListReportRows(ctx context.Context, siteID, dataset string, limit int) ([]ReportRow, error) {
+	rows, _, err := s.ListReportRowsPage(ctx, siteID, dataset, limit, "")
+	return rows, err
+}
+
+// ListReportRowsPage returns rows ordered by descending row key. nextCursor is
+// empty on the final page; callers must pass it back unchanged to continue.
+func (s *Store) ListReportRowsPage(ctx context.Context, siteID, dataset string, limit int, after string) ([]ReportRow, string, error) {
 	if strings.TrimSpace(dataset) == "" {
-		return nil, fmt.Errorf("dataset is required")
+		return nil, "", fmt.Errorf("dataset is required")
 	}
-	if limit <= 0 || limit > 500 {
+	if limit <= 0 || limit > 1000 {
 		limit = 100
 	}
-	rows, err := s.db.QueryContext(ctx, `
+	query := `
         SELECT dataset, row_key, data, updated_at
-        FROM report_rows WHERE site_id = ? AND dataset = ?
-        ORDER BY row_key DESC LIMIT ?`, siteID, dataset, limit)
+		FROM report_rows WHERE site_id = ? AND dataset = ?`
+	args := []any{siteID, dataset}
+	if after != "" {
+		query += " AND row_key < ?"
+		args = append(args, after)
+	}
+	query += " ORDER BY row_key DESC LIMIT ?"
+	args = append(args, limit+1)
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer rows.Close()
 	var out []ReportRow
@@ -459,15 +473,23 @@ func (s *Store) ListReportRows(ctx context.Context, siteID, dataset string, limi
 		var row ReportRow
 		var raw, updated string
 		if err := rows.Scan(&row.Dataset, &row.Key, &raw, &updated); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		if err := json.Unmarshal([]byte(raw), &row.Data); err != nil {
-			return nil, fmt.Errorf("decode report row: %w", err)
+			return nil, "", fmt.Errorf("decode report row: %w", err)
 		}
 		row.UpdatedAt, _ = time.Parse(timeLayout, updated)
 		out = append(out, row)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, "", err
+	}
+	nextCursor := ""
+	if len(out) > limit {
+		nextCursor = out[limit-1].Key
+		out = out[:limit]
+	}
+	return out, nextCursor, nil
 }
 
 // SetRunCursor persists a resume checkpoint mid-run.
