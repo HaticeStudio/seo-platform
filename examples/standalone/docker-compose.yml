@@ -1,0 +1,21 @@
+services:
+  seo-platform:
+    build:
+      context: ../..
+    environment:
+      SEO_PUBLIC_URL: ${SEO_PUBLIC_URL:?set the site public URL}
+      SEO_LISTEN: 0.0.0.0:8080
+      SEO_DB_PATH: /app/data/seo.db
+      SEO_SECRETS_DIR: /app/data/secrets
+      SEO_SECRETS_MASTER_KEY: ${SEO_SECRETS_MASTER_KEY:?generate with openssl rand -hex 32}
+      SEO_API_KEYS: ${SEO_API_KEYS:?provide sha256(key)=scopes}
+      SEO_GA4_CONVERSION_EVENTS: ${SEO_GA4_CONVERSION_EVENTS:-}
+      SEO_GOOGLE_OAUTH_CLIENT_ID: ${SEO_GOOGLE_OAUTH_CLIENT_ID:-}
+      SEO_GOOGLE_OAUTH_CLIENT_SECRET: ${SEO_GOOGLE_OAUTH_CLIENT_SECRET:-}
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - seo-data:/app/data
+
+volumes:
+  seo-data:
