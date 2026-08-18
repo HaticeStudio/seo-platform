@@ -39,6 +39,11 @@ func (s *Server) WithOAuthApps(apps map[string]OAuthApp) *Server {
 
 func (s *Server) oauthStart(w http.ResponseWriter, r *http.Request, subject core.Subject) {
 	provider := r.PathValue("provider")
+	registered, exists := s.registry.Get(provider)
+	if !exists || !containsCredentialType(registered.Descriptor().CredentialTypes, "oauth2") {
+		writeError(w, http.StatusNotFound, "provider does not support OAuth")
+		return
+	}
 	app, ok := s.oauthApps[provider]
 	if !ok {
 		writeError(w, http.StatusNotFound, "provider has no OAuth client configured")
@@ -46,6 +51,7 @@ func (s *Server) oauthStart(w http.ResponseWriter, r *http.Request, subject core
 	}
 	var req struct {
 		RedirectURI string `json:"redirect_uri"`
+		ReturnTo    string `json:"return_to"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<16)).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -56,9 +62,14 @@ func (s *Server) oauthStart(w http.ResponseWriter, r *http.Request, subject core
 		writeError(w, http.StatusBadRequest, "redirect_uri must be absolute and https (or loopback)")
 		return
 	}
-	platformURL, platformErr := url.Parse(s.platformURL)
-	if platformErr != nil || origin(redirect) != origin(platformURL) {
-		writeError(w, http.StatusBadRequest, "redirect_uri must use the configured platform origin")
+	expectedCallback := strings.TrimRight(s.platformURL, "/") + "/oauth/callback"
+	if redirect.String() != expectedCallback {
+		writeError(w, http.StatusBadRequest, "redirect_uri must match the configured OAuth callback")
+		return
+	}
+	returnTo, err := safeReturnTo(req.ReturnTo)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "return_to must be a local absolute path")
 		return
 	}
 
@@ -79,6 +90,7 @@ func (s *Server) oauthStart(w http.ResponseWriter, r *http.Request, subject core
 		SubjectID:    subject.ID,
 		PKCEVerifier: verifier,
 		RedirectURI:  redirect.String(),
+		ReturnTo:     returnTo,
 	}, oauthStateTTL); err != nil {
 		s.logger.Error("create oauth state", "provider", provider, "error", err)
 		writeError(w, http.StatusInternalServerError, "create oauth state")
@@ -105,11 +117,13 @@ func (s *Server) oauthStart(w http.ResponseWriter, r *http.Request, subject core
 	writeJSON(w, http.StatusOK, map[string]string{"authorize_url": authorizeURL, "state": state})
 }
 
-func origin(parsed *url.URL) string {
-	if parsed == nil {
-		return ""
+func containsCredentialType(types []string, want string) bool {
+	for _, credentialType := range types {
+		if credentialType == want {
+			return true
+		}
 	}
-	return strings.ToLower(parsed.Scheme + "://" + parsed.Host)
+	return false
 }
 
 func isLoopbackHost(host string) bool {
@@ -188,7 +202,22 @@ func (s *Server) oauthComplete(w http.ResponseWriter, r *http.Request, subject c
 		return
 	}
 	s.audit(r, subject, "connection.oauth.complete", provider, "ok")
-	s.finishCredentialUpdate(w, r, subject, provider, connection, ref)
+	s.finishCredentialUpdate(w, r, subject, provider, connection, ref, map[string]any{"return_to": pending.ReturnTo})
+}
+
+// safeReturnTo accepts a path owned by this Console only. Storing it inside
+// the single-use OAuth row binds navigation to the authorization request and
+// prevents an attacker from turning the callback into an open redirect.
+func safeReturnTo(raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "/", nil
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.IsAbs() || parsed.Host != "" || parsed.User != nil || parsed.Fragment != "" || !strings.HasPrefix(parsed.Path, "/") || strings.HasPrefix(value, "//") || strings.Contains(value, "\\") {
+		return "", errors.New("unsafe return path")
+	}
+	return parsed.RequestURI(), nil
 }
 
 func randomToken(bytes int) (string, error) {

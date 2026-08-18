@@ -141,6 +141,7 @@ func TestConnectionEndpointsRequireManageScope(t *testing.T) {
 
 func TestOAuthFlow(t *testing.T) {
 	server, st, _, site := newTestServer(t, adminSubject())
+	enableFakeOAuth(t, server)
 
 	// Fake authorization server: token endpoint returns a refresh token.
 	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -165,7 +166,7 @@ func TestOAuthFlow(t *testing.T) {
 	}})
 
 	rec := do(t, server, "POST", "/api/v0/connections/fake-search/oauth/start",
-		`{"redirect_uri":"https://example.test/oauth/callback"}`)
+		`{"redirect_uri":"https://example.test/oauth/callback","return_to":"/admin/seo?tab=connections"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("oauth start: %d %s", rec.Code, rec.Body.String())
 	}
@@ -189,6 +190,9 @@ func TestOAuthFlow(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), "rt") && strings.Contains(rec.Body.String(), "refresh") {
 		t.Fatal("refresh token leaked into response")
+	}
+	if !strings.Contains(rec.Body.String(), `"return_to":"/admin/seo?tab=connections"`) {
+		t.Fatalf("bound return path missing from response: %s", rec.Body.String())
 	}
 
 	connection, err := st.GetConnection(context.Background(), site.ID, "fake-search")
@@ -216,6 +220,7 @@ func TestOAuthFlow(t *testing.T) {
 
 func TestOAuthStateIsBoundToStartingSubject(t *testing.T) {
 	server, st, _, site := newTestServer(t, adminSubject())
+	enableFakeOAuth(t, server)
 	server.WithOAuthApps(map[string]OAuthApp{"fake-search": {
 		ClientID: "client-id", AuthURL: "https://auth.example.test/authorize", TokenURL: "https://auth.example.test/token",
 	}})
@@ -243,6 +248,7 @@ func TestOAuthStateIsBoundToStartingSubject(t *testing.T) {
 
 func TestOAuthStartRejectsInsecureRedirect(t *testing.T) {
 	server, _, _, _ := newTestServer(t, adminSubject())
+	enableFakeOAuth(t, server)
 	server.WithOAuthApps(map[string]OAuthApp{"fake-search": {ClientID: "c", TokenURL: "https://t", AuthURL: "https://a"}})
 	rec := do(t, server, "POST", "/api/v0/connections/fake-search/oauth/start",
 		`{"redirect_uri":"http://evil.example.test/callback"}`)
@@ -253,6 +259,7 @@ func TestOAuthStartRejectsInsecureRedirect(t *testing.T) {
 
 func TestOAuthUsesConfiguredPlatformOrigin(t *testing.T) {
 	server, _, _, _ := newTestServer(t, adminSubject())
+	enableFakeOAuth(t, server)
 	server.WithPlatformURL("https://seo.example.test")
 	server.WithOAuthApps(map[string]OAuthApp{"fake-search": {ClientID: "c", TokenURL: "https://t", AuthURL: "https://a"}})
 	accepted := do(t, server, "POST", "/api/v0/connections/fake-search/oauth/start",
@@ -264,5 +271,42 @@ func TestOAuthUsesConfiguredPlatformOrigin(t *testing.T) {
 		`{"redirect_uri":"https://example.test/oauth/callback"}`)
 	if rejected.Code != http.StatusBadRequest {
 		t.Fatalf("analyzed-site callback accepted instead of platform origin: %d", rejected.Code)
+	}
+	rejected = do(t, server, "POST", "/api/v0/connections/fake-search/oauth/start",
+		`{"redirect_uri":"https://seo.example.test/another-callback"}`)
+	if rejected.Code != http.StatusBadRequest {
+		t.Fatalf("same-origin unregistered callback accepted: %d", rejected.Code)
+	}
+}
+
+func enableFakeOAuth(t *testing.T, server *Server) {
+	t.Helper()
+	provider, ok := server.registry.Get("fake-search")
+	if !ok {
+		t.Fatal("fake provider is not registered")
+	}
+	fake := provider.(*providertest.Fake)
+	fake.Desc.CredentialTypes = append(fake.Desc.CredentialTypes, "oauth2")
+}
+
+func TestOAuthStartRejectsUnsafeReturnPath(t *testing.T) {
+	server, _, _, _ := newTestServer(t, adminSubject())
+	enableFakeOAuth(t, server)
+	server.WithOAuthApps(map[string]OAuthApp{"fake-search": {ClientID: "c", TokenURL: "https://t", AuthURL: "https://a"}})
+	for _, returnTo := range []string{"https://evil.example/path", "//evil.example/path", `/admin\\evil`, "/admin#fragment"} {
+		body := fmt.Sprintf(`{"redirect_uri":"https://example.test/oauth/callback","return_to":%q}`, returnTo)
+		if rec := do(t, server, "POST", "/api/v0/connections/fake-search/oauth/start", body); rec.Code != http.StatusBadRequest {
+			t.Errorf("unsafe return_to %q accepted: %d %s", returnTo, rec.Code, rec.Body.String())
+		}
+	}
+}
+
+func TestOAuthStartRequiresProviderOAuthCapability(t *testing.T) {
+	server, _, _, _ := newTestServer(t, adminSubject())
+	server.WithOAuthApps(map[string]OAuthApp{"fake-search": {ClientID: "c", TokenURL: "https://t", AuthURL: "https://a"}})
+	rec := do(t, server, "POST", "/api/v0/connections/fake-search/oauth/start",
+		`{"redirect_uri":"https://example.test/oauth/callback"}`)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("provider without OAuth capability accepted: %d %s", rec.Code, rec.Body.String())
 	}
 }

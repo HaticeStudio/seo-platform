@@ -61,4 +61,14 @@ func TestUpgradeFromInitialSchemaPreservesReportRows(t *testing.T) {
 	if applied != 1 {
 		t.Fatalf("migration records = %d, want 1", applied)
 	}
+	if err := upgraded.db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE name = '0004_oauth_return_to.sql'`).Scan(&applied); err != nil {
+		t.Fatal(err)
+	}
+	if applied != 1 {
+		t.Fatalf("OAuth return migration records = %d, want 1", applied)
+	}
+	var returnTo string
+	if err := upgraded.db.QueryRow(`SELECT return_to FROM oauth_states LIMIT 1`).Scan(&returnTo); err != sql.ErrNoRows {
+		t.Fatalf("OAuth return_to column check: %v", err)
+	}
 }

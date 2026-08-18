@@ -15,6 +15,7 @@ type OAuthState struct {
 	SubjectID    string
 	PKCEVerifier string
 	RedirectURI  string
+	ReturnTo     string
 	ExpiresAt    time.Time
 }
 
@@ -22,9 +23,9 @@ type OAuthState struct {
 func (s *Store) CreateOAuthState(ctx context.Context, state OAuthState, ttl time.Duration) error {
 	now := time.Now().UTC()
 	_, err := s.db.ExecContext(ctx, `
-        INSERT INTO oauth_states (state, provider, site_id, subject_id, pkce_verifier, redirect_uri, created_at, expires_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		state.State, state.Provider, state.SiteID, state.SubjectID, state.PKCEVerifier, state.RedirectURI,
+		INSERT INTO oauth_states (state, provider, site_id, subject_id, pkce_verifier, redirect_uri, return_to, created_at, expires_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		state.State, state.Provider, state.SiteID, state.SubjectID, state.PKCEVerifier, state.RedirectURI, state.ReturnTo,
 		now.Format(timeLayout), now.Add(ttl).Format(timeLayout))
 	return err
 }
@@ -37,11 +38,11 @@ func (s *Store) ConsumeOAuthState(ctx context.Context, state, provider, siteID, 
 	row := s.db.QueryRowContext(ctx, `
         DELETE FROM oauth_states
         WHERE state = ? AND provider = ? AND site_id = ? AND subject_id = ? AND expires_at > ?
-        RETURNING state, provider, site_id, subject_id, pkce_verifier, redirect_uri, expires_at`,
+		RETURNING state, provider, site_id, subject_id, pkce_verifier, redirect_uri, return_to, expires_at`,
 		state, provider, siteID, subjectID, time.Now().UTC().Format(timeLayout))
 	var out OAuthState
 	var expires string
-	err := row.Scan(&out.State, &out.Provider, &out.SiteID, &out.SubjectID, &out.PKCEVerifier, &out.RedirectURI, &expires)
+	err := row.Scan(&out.State, &out.Provider, &out.SiteID, &out.SubjectID, &out.PKCEVerifier, &out.RedirectURI, &out.ReturnTo, &expires)
 	if errors.Is(err, sql.ErrNoRows) {
 		return OAuthState{}, ErrOAuthStateInvalid
 	}

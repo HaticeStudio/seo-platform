@@ -2,6 +2,7 @@ package seo
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -30,6 +31,37 @@ func TestClientAuthenticatesAndDecodesProviders(t *testing.T) {
 	}
 	if len(providers) != 1 || providers[0].Name != "bing" {
 		t.Fatalf("providers = %+v", providers)
+	}
+}
+
+func TestOAuthRoundTripPreservesBoundReturnPath(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v0/connections/google-search-console/oauth/start":
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body["return_to"] != "/admin/seo?tab=connections" {
+				t.Errorf("return_to = %q", body["return_to"])
+			}
+			_, _ = w.Write([]byte(`{"authorize_url":"https://accounts.example/authorize","state":"opaque-state"}`))
+		case "/api/v0/connections/google-search-console/oauth/complete":
+			_, _ = w.Write([]byte(`{"configured":true,"return_to":"/admin/seo?tab=connections","properties":[{"reference":"sc-domain:example.test","display_name":"example.test"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client, _ := New(server.URL, func(context.Context) (string, error) { return "token", nil }, server.Client())
+	authorizeURL, state, err := client.StartOAuthWithReturn(context.Background(), "google-search-console", "https://seo.example/oauth/callback", "/admin/seo?tab=connections")
+	if err != nil || authorizeURL == "" || state != "opaque-state" {
+		t.Fatalf("start OAuth: url=%q state=%q err=%v", authorizeURL, state, err)
+	}
+	properties, returnTo, err := client.CompleteOAuthWithReturn(context.Background(), "google-search-console", state, "temporary-code")
+	if err != nil || returnTo != "/admin/seo?tab=connections" || len(properties) != 1 {
+		t.Fatalf("complete OAuth: properties=%+v return=%q err=%v", properties, returnTo, err)
 	}
 }
 

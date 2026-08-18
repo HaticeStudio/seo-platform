@@ -4,7 +4,7 @@
 # Required in .env: SEO_PUBLIC_URL=https://www.example.com
 services:
   seo-platform:
-    image: ghcr.io/haticestudio/seo-platform:${SEO_PLATFORM_VERSION:-v0.1.1}
+    image: ghcr.io/haticestudio/seo-platform:${SEO_PLATFORM_VERSION:-v0.2.0}
     build:
       context: ..
     environment:

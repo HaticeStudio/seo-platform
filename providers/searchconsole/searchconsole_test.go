@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/HaticeStudio/seo-platform/core"
 	"github.com/HaticeStudio/seo-platform/providertest"
+	"golang.org/x/oauth2"
 	"google.golang.org/api/googleapi"
 	searchconsole "google.golang.org/api/searchconsole/v1"
 )
@@ -148,6 +150,20 @@ func TestSyncClassifiesGoogleErrors(t *testing.T) {
 		if fmt.Sprint(classified) == "" || classified.Message == "secret-internal-detail" {
 			t.Error("raw Google error body leaked")
 		}
+	}
+}
+
+func TestClassifyExpiredOAuthRefreshToken(t *testing.T) {
+	err := classify(&oauth2.RetrieveError{
+		Response: &http.Response{StatusCode: http.StatusBadRequest},
+		Body:     []byte(`{"error":"invalid_grant","secret":"must-not-leak"}`),
+	})
+	classified, ok := err.(*core.SyncError)
+	if !ok || classified.Code != core.ErrUnauthorized {
+		t.Fatalf("got %v, want UNAUTHORIZED", err)
+	}
+	if strings.Contains(classified.Message, "invalid_grant") || strings.Contains(classified.Message, "must-not-leak") {
+		t.Fatalf("OAuth response body leaked: %q", classified.Message)
 	}
 }
 

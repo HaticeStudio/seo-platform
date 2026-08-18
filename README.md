@@ -64,12 +64,37 @@ key; retrieve it once with `seo-platform admin bootstrap`. Explicit
 `SEO_API_KEYS` disables this bootstrap path. Development auth is opt-in and
 refuses non-loopback binds.
 
+### Guided provider setup
+
+Open the Console after startup. Its **Setup values** section shows copyable
+public URL, sitemap URL, and OAuth callback URL values. Each provider card then
+walks an administrator through its official console links, authorization or
+one-time credential entry, property discovery/selection, a live connection
+test, and the first sync.
+
+For Google OAuth, create a Web application client in Google Cloud and register
+the exact callback value shown by the Console. Configure its client ID and
+secret on the server with `SEO_GOOGLE_OAUTH_CLIENT_ID` and
+`SEO_GOOGLE_OAUTH_CLIENT_SECRET`; the secret is never sent to the browser.
+Search Console and GA4 use the same Google OAuth client. Service-account JSON
+remains an optional unattended fallback. Bing uses a Webmaster API key.
+
+Provider credentials are write-only. Manual values and OAuth refresh tokens
+are encrypted immediately by `SecretStore`, API responses expose only
+connection state, and the Console does not persist provider credentials,
+authorization codes, or refresh tokens in browser storage.
+
 ## Public integration surfaces
 
 - HTTP contract: [`api/openapi.yaml`](api/openapi.yaml)
 - Go client: `github.com/HaticeStudio/seo-platform/sdk/go/seo`
 - React package: `@haticestudio/seo-console` (build with `npm run build:lib`)
 - Embedded-console example: [`examples/embedded-console`](examples/embedded-console/README.md)
+
+An embedded browser must not receive a long-lived seo-platform API key. Put a
+host-authenticated reverse proxy or backend-for-frontend in front of `/api/v0`
+and let that server-side adapter add the platform credential. The public
+Console `AuthClient` then supplies only the host's short-lived access token.
 
 ## Repository layout
 

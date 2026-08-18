@@ -21,7 +21,7 @@ export type ProviderDescriptor = {
   setup_url?: string
   docs_url?: string
   oauth_available: boolean
-  setup_links?: { label: string; url: string }[]
+  setup_links?: { kind?: string; label: string; url: string; description?: string }[]
 }
 
 export type SiteContext = {
@@ -37,6 +37,7 @@ export type DiscoveredProperty = {
 
 export type ConnectionState =
   | 'not_configured'
+  | 'reauthorization_required'
   | 'error'
   | 'stale'
   | 'no_data'
@@ -185,10 +186,10 @@ export class ApiClient {
     })
   }
 
-  oauthStart(provider: string, redirectUri: string): Promise<{ authorize_url: string; state: string }> {
+  oauthStart(provider: string, redirectUri: string, returnTo = '/'): Promise<{ authorize_url: string; state: string }> {
     return this.request(`/api/v0/connections/${encodeURIComponent(provider)}/oauth/start`, {
       method: 'POST',
-      body: JSON.stringify({ redirect_uri: redirectUri }),
+      body: JSON.stringify({ redirect_uri: redirectUri, return_to: returnTo }),
     })
   }
 
@@ -196,7 +197,7 @@ export class ApiClient {
     provider: string,
     state: string,
     code: string,
-  ): Promise<{ configured: boolean; properties?: DiscoveredProperty[] }> {
+  ): Promise<{ configured: boolean; properties?: DiscoveredProperty[]; return_to?: string }> {
     return this.request(`/api/v0/connections/${encodeURIComponent(provider)}/oauth/complete`, {
       method: 'POST',
       body: JSON.stringify({ state, code }),

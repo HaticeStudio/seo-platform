@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.2.0 — 2026-08-19
+
+- Added a responsive English and Traditional Chinese guided setup Console with
+  copyable site values, semantic official-console links, one-time credential
+  entry, property selection, live testing, sync state, and actionable errors.
+- Bound the post-OAuth navigation path to single-use, subject/site/provider
+  scoped PKCE state and exposed return-aware helpers in the React and Go SDKs.
+- Added a distinct reauthorization state for expired, revoked, or unauthorized
+  Google OAuth credentials without exposing upstream response bodies.
+- Expanded provider setup-link metadata while preserving existing fields and
+  manual service-account/API-key flows.
+
+Migration notes: startup applies the additive `0004_oauth_return_to.sql`
+migration to existing SQLite databases. HTTP and SDK changes are additive.
+Rollback to v0.1.1 leaves the unused column in place and does not delete data.
+
 ## v0.1.1 — 2026-08-18
 
 - Added cursor pagination to normalized report rows so host applications can

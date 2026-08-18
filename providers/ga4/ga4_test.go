@@ -4,11 +4,13 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/HaticeStudio/seo-platform/core"
 	"github.com/HaticeStudio/seo-platform/providertest"
+	"golang.org/x/oauth2"
 	analyticsdata "google.golang.org/api/analyticsdata/v1beta"
 )
 
@@ -178,6 +180,20 @@ func TestMissingPropertyIsNotConfigured(t *testing.T) {
 	classified, ok := err.(*core.SyncError)
 	if !ok || classified.Code != core.ErrNotConfigured {
 		t.Errorf("got %v, want NOT_CONFIGURED", err)
+	}
+}
+
+func TestClassifyExpiredOAuthRefreshToken(t *testing.T) {
+	err := classify(&oauth2.RetrieveError{
+		Response: &http.Response{StatusCode: http.StatusUnauthorized},
+		Body:     []byte(`{"error":"invalid_grant","secret":"must-not-leak"}`),
+	})
+	classified, ok := err.(*core.SyncError)
+	if !ok || classified.Code != core.ErrUnauthorized {
+		t.Fatalf("got %v, want UNAUTHORIZED", err)
+	}
+	if strings.Contains(classified.Message, "invalid_grant") || strings.Contains(classified.Message, "must-not-leak") {
+		t.Fatalf("OAuth response body leaked: %q", classified.Message)
 	}
 }
 
