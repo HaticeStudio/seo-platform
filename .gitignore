@@ -3,3 +3,5 @@
 *.key
 data/
 /seo-platform
+node_modules/
+console/dist/

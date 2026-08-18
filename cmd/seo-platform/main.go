@@ -127,6 +127,12 @@ func run(logger *slog.Logger) error {
 	go engine.Run(runCtx)
 
 	api := httpapi.New(st, reg, engine, authenticator, site, logger)
+	if consoleDir := strings.TrimSpace(os.Getenv("SEO_CONSOLE_DIR")); consoleDir != "" {
+		if _, statErr := os.Stat(consoleDir); statErr != nil {
+			return fmt.Errorf("SEO_CONSOLE_DIR %q is not readable: %w", consoleDir, statErr)
+		}
+		api = api.WithConsole(consoleDir)
+	}
 	server := &http.Server{Addr: listen, Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-runCtx.Done()

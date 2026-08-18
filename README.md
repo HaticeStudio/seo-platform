@@ -52,6 +52,7 @@ curl -H "Authorization: Bearer $API_KEY" http://127.0.0.1:8080/api/v0/providers
 | `SEO_API_KEYS` | (unset) | `sha256hex=scope1,scope2;...` — hashes only, never plaintext |
 | `SEO_DEV_AUTH` | `false` | Loopback-only no-credential auth for local development |
 | `SEO_GA4_CONVERSION_EVENTS` | (unset) | Comma-separated GA4 event names this deployment counts as conversions |
+| `SEO_CONSOLE_DIR` | (container: `/app/console`) | Serve the built React console from this directory |
 | `SEO_SYNC_LOOKBACK_DAYS` | `30` | Default sync range |
 | `SEO_SYNC_TIMEOUT` | `10m` | Per-run timeout |
 | `SEO_SYNC_INTERVAL` | `24h` | Scheduler interval |
@@ -66,6 +67,7 @@ cmd/seo-platform/   standalone server entry point
 core/               public contracts: Provider, SecretStore, resolvers, models
 providers/          provider implementations (Search Console, Bing, GA4)
 providertest/       public contract-test kit + fake provider
+console/            React console: standalone app + embeddable package
 internal/           server runtime (not public Go API)
 migrations/         forward-only SQL migrations
 deploy/             Docker Compose example

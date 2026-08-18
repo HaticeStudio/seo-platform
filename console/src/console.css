@@ -1,0 +1,143 @@
+.seo-console {
+  --seo-accent: #2563eb;
+  --seo-background: #f8fafc;
+  --seo-surface: #ffffff;
+  --seo-text: #0f172a;
+  color: var(--seo-text);
+  background: var(--seo-background);
+  font-family: system-ui, sans-serif;
+  padding: 1.5rem;
+  display: grid;
+  gap: 2rem;
+}
+
+.seo-console h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+}
+
+.seo-console__error {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+}
+
+.seo-console__cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 1rem;
+}
+
+.seo-console__card {
+  background: var(--seo-surface);
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 1rem;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.seo-console__card header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.seo-console__card h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.seo-console__state {
+  font-size: 0.75rem;
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+  background: #e2e8f0;
+  white-space: nowrap;
+}
+
+.seo-console__state--connected {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.seo-console__state--error {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.seo-console__state--stale,
+.seo-console__state--no_data {
+  background: #fef9c3;
+  color: #854d0e;
+}
+
+.seo-console__property {
+  margin: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+}
+
+.seo-console__hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #475569;
+}
+
+.seo-console__hint--error {
+  color: #b91c1c;
+}
+
+.seo-console__card footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.seo-console__card button {
+  background: var(--seo-accent);
+  color: #fff;
+  border: 0;
+  border-radius: 6px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.seo-console__card button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.seo-console__table-wrap {
+  overflow-x: auto;
+}
+
+.seo-console table {
+  border-collapse: collapse;
+  width: 100%;
+  background: var(--seo-surface);
+  font-size: 0.85rem;
+}
+
+.seo-console th,
+.seo-console td {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.seo-console__status--failed {
+  color: #b91c1c;
+}
+
+.seo-console__status--succeeded {
+  color: #166534;
+}
+
+.seo-console__status--partial {
+  color: #854d0e;
+}

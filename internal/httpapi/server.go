@@ -9,6 +9,9 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
+	"path"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -23,9 +26,10 @@ type Server struct {
 	store    *store.Store
 	registry *registry.Registry
 	engine   *syncengine.Engine
-	auth     auth.Authenticator
-	site     core.Site
-	logger   *slog.Logger
+	auth       auth.Authenticator
+	site       core.Site
+	logger     *slog.Logger
+	consoleDir string
 }
 
 func New(st *store.Store, reg *registry.Registry, engine *syncengine.Engine, authn auth.Authenticator, site core.Site, logger *slog.Logger) *Server {
@@ -51,7 +55,32 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v0/connections", s.authorized(core.ScopeRead, s.listConnections))
 	mux.Handle("GET /api/v0/sync-runs", s.authorized(core.ScopeRead, s.listSyncRuns))
 	mux.Handle("POST /api/v0/sync-runs", s.authorized(core.ScopeSync, s.createSyncRun))
+	if s.consoleDir != "" {
+		mux.Handle("GET /", spaHandler(s.consoleDir))
+	}
 	return mux
+}
+
+// WithConsole serves the built console app from dir. The console is static
+// assets only; every data request still passes the auth boundary above.
+func (s *Server) WithConsole(dir string) *Server {
+	s.consoleDir = dir
+	return s
+}
+
+// spaHandler serves static files, falling back to index.html for client-side
+// routes. Paths are cleaned by http.FileServer; unknown files 404 via the
+// fallback probe below rather than leaking directory listings.
+func spaHandler(dir string) http.Handler {
+	fileServer := http.FileServer(http.Dir(dir))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		probe := filepath.Join(dir, filepath.FromSlash(path.Clean("/"+r.URL.Path)))
+		if info, err := os.Stat(probe); err != nil || info.IsDir() {
+			http.ServeFile(w, r, filepath.Join(dir, "index.html"))
+			return
+		}
+		fileServer.ServeHTTP(w, r)
+	})
 }
 
 type handlerFunc func(w http.ResponseWriter, r *http.Request, subject core.Subject)
