@@ -12,7 +12,7 @@ RUN npm ci --no-fund --no-audit
 COPY console/ .
 RUN npm run build
 
-FROM alpine:3.20
+FROM alpine:3.24
 RUN addgroup -S seo && adduser -S seo -G seo && apk add --no-cache ca-certificates \
     && mkdir -p /app/data /app/keys /app/auth /app/bootstrap \
     && chown -R seo:seo /app
