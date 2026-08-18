@@ -51,6 +51,7 @@ curl -H "Authorization: Bearer $API_KEY" http://127.0.0.1:8080/api/v0/providers
 | `SEO_SECRETS_DIR` | `data/secrets` | Encrypted secret files directory |
 | `SEO_API_KEYS` | (unset) | `sha256hex=scope1,scope2;...` — hashes only, never plaintext |
 | `SEO_DEV_AUTH` | `false` | Loopback-only no-credential auth for local development |
+| `SEO_GA4_CONVERSION_EVENTS` | (unset) | Comma-separated GA4 event names this deployment counts as conversions |
 | `SEO_SYNC_LOOKBACK_DAYS` | `30` | Default sync range |
 | `SEO_SYNC_TIMEOUT` | `10m` | Per-run timeout |
 | `SEO_SYNC_INTERVAL` | `24h` | Scheduler interval |

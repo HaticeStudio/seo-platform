@@ -26,6 +26,7 @@ import (
 	"github.com/HaticeStudio/seo-platform/internal/store"
 	syncengine "github.com/HaticeStudio/seo-platform/internal/sync"
 	"github.com/HaticeStudio/seo-platform/providers/bing"
+	"github.com/HaticeStudio/seo-platform/providers/ga4"
 	"github.com/HaticeStudio/seo-platform/providers/searchconsole"
 )
 
@@ -97,7 +98,13 @@ func run(logger *slog.Logger) error {
 	// The standalone binary ships every provider; each stays not_configured
 	// (and costs nothing) until an administrator adds credentials.
 	reg := registry.New()
-	for _, provider := range []core.Provider{bing.New(), searchconsole.New()} {
+	// Conversion events are deployment configuration; nothing is built in.
+	conversionEvents := strings.Split(os.Getenv("SEO_GA4_CONVERSION_EVENTS"), ",")
+	for _, provider := range []core.Provider{
+		bing.New(),
+		searchconsole.New(),
+		ga4.New(ga4.WithConversionEvents(conversionEvents)),
+	} {
 		if err := reg.Register(provider); err != nil {
 			return err
 		}
