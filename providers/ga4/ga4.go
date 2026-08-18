@@ -40,6 +40,8 @@ var trafficMetrics = []string{"sessions", "engagedSessions", "activeUsers", "new
 type Provider struct {
 	conversionEvents []string
 	newService       func(ctx context.Context, credential core.CredentialHandle) (service, error)
+	client           *http.Client
+	revokeURL        string
 }
 
 type service interface {
@@ -61,7 +63,7 @@ func WithConversionEvents(events []string) Option {
 }
 
 func New(options ...Option) *Provider {
-	p := &Provider{newService: newGoogleService}
+	p := &Provider{newService: newGoogleService, client: &http.Client{Timeout: 30 * time.Second}, revokeURL: "https://oauth2.googleapis.com/revoke"}
 	for _, option := range options {
 		option(p)
 	}
@@ -93,14 +95,22 @@ func (p *Provider) Descriptor() core.Descriptor {
 		Capabilities:    capabilities,
 		SetupURL:        "https://analytics.google.com/analytics/web/",
 		DocsURL:         "https://developers.google.com/analytics/devguides/reporting/data/v1",
+		SetupLinks: []core.SetupLink{
+			{Label: "Google Analytics", URL: "https://analytics.google.com/analytics/web/"},
+			{Label: "Google Analytics Admin", URL: "https://analytics.google.com/analytics/web/#/a/admin"},
+			{Label: "Google Cloud credentials", URL: "https://console.cloud.google.com/apis/credentials"},
+		},
 	}
 }
 
-func (p *Provider) DiscoverProperties(context.Context, core.CredentialHandle) ([]core.Property, error) {
+func (p *Provider) DiscoverProperties(ctx context.Context, credential core.CredentialHandle) ([]core.Property, error) {
 	// The Data API cannot enumerate properties; that needs the Admin API,
 	// which arrives with the interactive OAuth flow. Administrators enter the
 	// numeric property ID meanwhile.
-	return nil, &core.SyncError{Code: core.ErrUnsupported, Message: "GA4 property discovery is not available; enter the property ID directly"}
+	if _, err := p.newService(ctx, credential); err != nil {
+		return nil, err
+	}
+	return nil, &core.SyncError{Code: core.ErrUnsupported, Message: "GA4 property discovery is not available; enter the numeric property ID"}
 }
 
 func (p *Provider) Test(ctx context.Context, _ core.Site, property core.Property, credential core.CredentialHandle) error {
@@ -120,8 +130,29 @@ func (p *Provider) Test(ctx context.Context, _ core.Site, property core.Property
 	return nil
 }
 
-func (p *Provider) Revoke(context.Context, core.CredentialHandle) error {
-	// Service-account keys are revoked in Google Cloud IAM.
+func (p *Provider) Revoke(ctx context.Context, credential core.CredentialHandle) error {
+	material := credential.Material()
+	if material.Type != "oauth2" {
+		// Service-account keys are revoked in Google Cloud IAM.
+		return nil
+	}
+	oauth, err := core.ParseOAuthMaterial(material.Bytes)
+	if err != nil {
+		return &core.SyncError{Code: core.ErrUnauthorized, Message: "Google OAuth credential is invalid"}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.revokeURL, strings.NewReader(url.Values{"token": []string{oauth.RefreshToken}}.Encode()))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	response, err := p.client.Do(req)
+	if err != nil {
+		return &core.SyncError{Code: core.ErrTransient, Message: "Google token revocation failed"}
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return &core.SyncError{Code: core.ErrTransient, Message: "Google token revocation failed"}
+	}
 	return nil
 }
 

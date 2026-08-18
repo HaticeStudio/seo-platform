@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/HaticeStudio/seo-platform/core"
+	"github.com/HaticeStudio/seo-platform/providertest"
 )
 
 func adminSubject() core.Subject {
@@ -79,9 +80,48 @@ func TestCredentialLifecycle(t *testing.T) {
 	if connection.Enabled || connection.CredentialRef.ID != "" {
 		t.Errorf("connection still configured after revoke: %+v", connection)
 	}
-	if _, err := server.secrets.Open(context.Background(), previousRef, core.PurposeSync); err == nil {
+	scope := core.Scope{SiteID: site.ID, Provider: "fake-search"}
+	if _, err := server.secrets.Open(context.Background(), scope, previousRef, core.PurposeSync); err == nil {
 		t.Error("revoked credential still opens")
 	}
+}
+
+func TestInvalidCredentialRotationKeepsPreviousCredential(t *testing.T) {
+	server, st, _, site := newTestServer(t, adminSubject())
+	if rec := do(t, server, "PUT", "/api/v0/connections/fake-search/credential",
+		`{"credential_type":"api_key","material":"known-good"}`); rec.Code != http.StatusOK {
+		t.Fatalf("initial credential: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, server, "PUT", "/api/v0/connections/fake-search/property",
+		`{"property_reference":"fake-property"}`); rec.Code != http.StatusOK {
+		t.Fatalf("initial property: %d %s", rec.Code, rec.Body.String())
+	}
+	before, err := st.GetConnection(context.Background(), site.ID, "fake-search")
+	if err != nil {
+		t.Fatal(err)
+	}
+	registered, _ := server.registry.Get("fake-search")
+	fake := registered.(*providertest.Fake)
+	fake.TestFunc = func(context.Context) error {
+		return &core.SyncError{Code: core.ErrUnauthorized, Message: "replacement rejected"}
+	}
+	rec := do(t, server, "PUT", "/api/v0/connections/fake-search/credential",
+		`{"credential_type":"api_key","material":"known-bad"}`)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("invalid replacement: %d %s", rec.Code, rec.Body.String())
+	}
+	after, err := st.GetConnection(context.Background(), site.ID, "fake-search")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.CredentialRef != before.CredentialRef || !after.Enabled {
+		t.Fatalf("previous credential was replaced or disabled: before=%+v after=%+v", before, after)
+	}
+	handle, err := server.secrets.Open(context.Background(), core.Scope{SiteID: site.ID, Provider: "fake-search"}, before.CredentialRef, core.PurposeTest)
+	if err != nil {
+		t.Fatalf("previous credential was revoked: %v", err)
+	}
+	handle.Close()
 }
 
 func TestConnectionEndpointsRequireManageScope(t *testing.T) {
@@ -125,7 +165,7 @@ func TestOAuthFlow(t *testing.T) {
 	}})
 
 	rec := do(t, server, "POST", "/api/v0/connections/fake-search/oauth/start",
-		`{"redirect_uri":"https://console.example.test/callback"}`)
+		`{"redirect_uri":"https://example.test/oauth/callback"}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("oauth start: %d %s", rec.Code, rec.Body.String())
 	}
@@ -155,7 +195,8 @@ func TestOAuthFlow(t *testing.T) {
 	if err != nil || connection.CredentialRef.ID == "" || connection.CredentialRef.Type != "oauth2" {
 		t.Fatalf("connection after oauth: %+v err=%v", connection, err)
 	}
-	handle, err := server.secrets.Open(context.Background(), connection.CredentialRef, core.PurposeSync)
+	scope := core.Scope{SiteID: site.ID, Provider: "fake-search"}
+	handle, err := server.secrets.Open(context.Background(), scope, connection.CredentialRef, core.PurposeSync)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,6 +214,33 @@ func TestOAuthFlow(t *testing.T) {
 	}
 }
 
+func TestOAuthStateIsBoundToStartingSubject(t *testing.T) {
+	server, st, _, site := newTestServer(t, adminSubject())
+	server.WithOAuthApps(map[string]OAuthApp{"fake-search": {
+		ClientID: "client-id", AuthURL: "https://auth.example.test/authorize", TokenURL: "https://auth.example.test/token",
+	}})
+	rec := do(t, server, "POST", "/api/v0/connections/fake-search/oauth/start",
+		`{"redirect_uri":"https://example.test/oauth/callback"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("oauth start: %d %s", rec.Code, rec.Body.String())
+	}
+	var started struct {
+		State string `json:"state"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &started); err != nil {
+		t.Fatal(err)
+	}
+	server.auth = staticAuth{subject: core.Subject{ID: "other-admin", Scopes: []string{core.ScopeConnectionsManage}}}
+	rec = do(t, server, "POST", "/api/v0/connections/fake-search/oauth/complete",
+		`{"state":"`+started.State+`","code":"stolen-code"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("another subject consumed OAuth state: %d %s", rec.Code, rec.Body.String())
+	}
+	if _, err := st.ConsumeOAuthState(context.Background(), started.State, "fake-search", site.ID, "admin"); err != nil {
+		t.Fatalf("mismatched subject invalidated the legitimate state: %v", err)
+	}
+}
+
 func TestOAuthStartRejectsInsecureRedirect(t *testing.T) {
 	server, _, _, _ := newTestServer(t, adminSubject())
 	server.WithOAuthApps(map[string]OAuthApp{"fake-search": {ClientID: "c", TokenURL: "https://t", AuthURL: "https://a"}})
@@ -180,5 +248,21 @@ func TestOAuthStartRejectsInsecureRedirect(t *testing.T) {
 		`{"redirect_uri":"http://evil.example.test/callback"}`)
 	if rec.Code != http.StatusBadRequest {
 		t.Errorf("insecure redirect accepted: %d", rec.Code)
+	}
+}
+
+func TestOAuthUsesConfiguredPlatformOrigin(t *testing.T) {
+	server, _, _, _ := newTestServer(t, adminSubject())
+	server.WithPlatformURL("https://seo.example.test")
+	server.WithOAuthApps(map[string]OAuthApp{"fake-search": {ClientID: "c", TokenURL: "https://t", AuthURL: "https://a"}})
+	accepted := do(t, server, "POST", "/api/v0/connections/fake-search/oauth/start",
+		`{"redirect_uri":"https://seo.example.test/oauth/callback"}`)
+	if accepted.Code != http.StatusOK {
+		t.Fatalf("configured platform callback rejected: %d %s", accepted.Code, accepted.Body.String())
+	}
+	rejected := do(t, server, "POST", "/api/v0/connections/fake-search/oauth/start",
+		`{"redirect_uri":"https://example.test/oauth/callback"}`)
+	if rejected.Code != http.StatusBadRequest {
+		t.Fatalf("analyzed-site callback accepted instead of platform origin: %d", rejected.Code)
 	}
 }

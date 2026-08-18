@@ -32,7 +32,7 @@ func TestFileRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	handle, err := store.Open(ctx, ref, core.PurposeSync)
+	handle, err := store.Open(ctx, scope, ref, core.PurposeSync)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,14 +66,15 @@ func TestFileRoundTrip(t *testing.T) {
 func TestFileRotateAndRevoke(t *testing.T) {
 	store, _ := newFileStore(t)
 	ctx := context.Background()
-	ref, err := store.Put(ctx, core.Scope{SiteID: "default", Provider: "fake"}, core.SecretMaterial{Type: "api_key", Bytes: []byte("v1")})
+	scope := core.Scope{SiteID: "default", Provider: "fake"}
+	ref, err := store.Put(ctx, scope, core.SecretMaterial{Type: "api_key", Bytes: []byte("v1")})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.Rotate(ctx, ref, core.SecretMaterial{Type: "api_key", Bytes: []byte("v2")}); err != nil {
+	if err := store.Rotate(ctx, scope, ref, core.SecretMaterial{Type: "api_key", Bytes: []byte("v2")}); err != nil {
 		t.Fatal(err)
 	}
-	handle, err := store.Open(ctx, ref, core.PurposeSync)
+	handle, err := store.Open(ctx, scope, ref, core.PurposeSync)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,13 +83,13 @@ func TestFileRotateAndRevoke(t *testing.T) {
 	}
 	handle.Close()
 
-	if err := store.Revoke(ctx, ref); err != nil {
+	if err := store.Revoke(ctx, scope, ref); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.Open(ctx, ref, core.PurposeSync); err == nil {
+	if _, err := store.Open(ctx, scope, ref, core.PurposeSync); err == nil {
 		t.Error("revoked credential still opens")
 	}
-	if err := store.Revoke(ctx, ref); err != nil {
+	if err := store.Revoke(ctx, scope, ref); err != nil {
 		t.Errorf("revoke is not idempotent: %v", err)
 	}
 }
@@ -98,7 +99,7 @@ func TestFileRejectsBadKeyAndBadRef(t *testing.T) {
 		t.Error("bad master key accepted")
 	}
 	store, _ := newFileStore(t)
-	if _, err := store.Open(context.Background(), core.CredentialRef{ID: "../../etc/passwd"}, core.PurposeSync); err == nil {
+	if _, err := store.Open(context.Background(), core.Scope{}, core.CredentialRef{ID: "../../etc/passwd"}, core.PurposeSync); err == nil {
 		t.Error("path-traversal ref accepted")
 	}
 }
@@ -109,7 +110,8 @@ func TestFileWrongMasterKeyFailsToOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ref, err := store.Put(context.Background(), core.Scope{SiteID: "default", Provider: "fake"}, core.SecretMaterial{Type: "api_key", Bytes: []byte("secret")})
+	scope := core.Scope{SiteID: "default", Provider: "fake"}
+	ref, err := store.Put(context.Background(), scope, core.SecretMaterial{Type: "api_key", Bytes: []byte("secret")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +119,27 @@ func TestFileWrongMasterKeyFailsToOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := other.Open(context.Background(), ref, core.PurposeSync); err == nil {
+	if _, err := other.Open(context.Background(), scope, ref, core.PurposeSync); err == nil {
 		t.Error("wrong master key decrypted the secret")
+	}
+}
+
+func TestFileRejectsCrossScopeAccess(t *testing.T) {
+	store, _ := newFileStore(t)
+	ctx := context.Background()
+	scope := core.Scope{Workspace: "one", SiteID: "site", Provider: "fake"}
+	ref, err := store.Put(ctx, scope, core.SecretMaterial{Type: "api_key", Bytes: []byte("secret")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrong := core.Scope{Workspace: "two", SiteID: "site", Provider: "fake"}
+	if _, err := store.Open(ctx, wrong, ref, core.PurposeSync); err == nil {
+		t.Fatal("cross-scope credential opened")
+	}
+	if err := store.Rotate(ctx, wrong, ref, core.SecretMaterial{Type: "api_key", Bytes: []byte("other")}); err == nil {
+		t.Fatal("cross-scope credential rotated")
+	}
+	if err := store.Revoke(ctx, wrong, ref); err == nil {
+		t.Fatal("cross-scope credential revoked")
 	}
 }

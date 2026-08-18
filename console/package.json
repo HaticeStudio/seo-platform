@@ -6,28 +6,38 @@
   "type": "module",
   "main": "./dist/lib/seo-console.js",
   "types": "./dist/lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/lib/index.d.ts",
+      "import": "./dist/lib/seo-console.js"
+    },
+    "./style.css": "./dist/lib/seo-console.css"
+  },
   "files": [
     "dist/lib"
   ],
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "build:lib": "vite build --config vite.lib.config.ts",
+    "build:lib": "vite build --config vite.lib.config.ts && tsc -p tsconfig.lib.json",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
     "react": ">=18",
     "react-dom": ">=18"
   },
-  "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
-  },
   "devDependencies": {
+    "@testing-library/react": "^16.3.2",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "axe-core": "^4.13.0",
+    "jsdom": "^26.1.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "typescript": "^5.7.2",
-    "vite": "^6.0.7"
+    "vite": "^6.0.7",
+    "vitest": "^3.2.7"
   }
 }

@@ -13,6 +13,7 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/HaticeStudio/seo-platform/core"
@@ -23,22 +24,23 @@ import (
 )
 
 type Server struct {
-	store      *store.Store
-	registry   *registry.Registry
-	engine     *syncengine.Engine
-	auth       auth.Authenticator
-	secrets    core.SecretStore
-	site       core.Site
-	logger     *slog.Logger
-	consoleDir string
-	oauthApps  map[string]OAuthApp
+	store       *store.Store
+	registry    *registry.Registry
+	engine      *syncengine.Engine
+	auth        auth.Authenticator
+	secrets     core.SecretStore
+	site        core.Site
+	logger      *slog.Logger
+	consoleDir  string
+	oauthApps   map[string]OAuthApp
+	platformURL string
 }
 
 func New(st *store.Store, reg *registry.Registry, engine *syncengine.Engine, authn auth.Authenticator, sec core.SecretStore, site core.Site, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{store: st, registry: reg, engine: engine, auth: authn, secrets: sec, site: site, logger: logger}
+	return &Server{store: st, registry: reg, engine: engine, auth: authn, secrets: sec, site: site, logger: logger, platformURL: site.PublicURL}
 }
 
 func (s *Server) Handler() http.Handler {
@@ -54,8 +56,11 @@ func (s *Server) Handler() http.Handler {
 		w.WriteHeader(http.StatusOK)
 	})
 	mux.Handle("GET /api/v0/providers", s.authorized(core.ScopeRead, s.listProviders))
+	mux.Handle("GET /api/v0/site", s.authorized(core.ScopeRead, s.getSite))
 	mux.Handle("GET /api/v0/connections", s.authorized(core.ScopeRead, s.listConnections))
 	mux.Handle("GET /api/v0/sync-runs", s.authorized(core.ScopeRead, s.listSyncRuns))
+	mux.Handle("GET /api/v0/report-datasets", s.authorized(core.ScopeRead, s.listReportDatasets))
+	mux.Handle("GET /api/v0/report-rows", s.authorized(core.ScopeRead, s.listReportRows))
 	mux.Handle("POST /api/v0/sync-runs", s.authorized(core.ScopeSync, s.createSyncRun))
 	mux.Handle("PUT /api/v0/connections/{provider}/credential", s.authorized(core.ScopeConnectionsManage, s.setCredential))
 	mux.Handle("PUT /api/v0/connections/{provider}/property", s.authorized(core.ScopeConnectionsManage, s.setProperty))
@@ -68,6 +73,14 @@ func (s *Server) Handler() http.Handler {
 		mux.Handle("GET /", spaHandler(s.consoleDir))
 	}
 	return mux
+}
+
+// WithPlatformURL sets the public origin that owns the OAuth callback. It is
+// separate from the analyzed site's public URL because deployments commonly
+// run the Console on an admin subdomain.
+func (s *Server) WithPlatformURL(publicURL string) *Server {
+	s.platformURL = strings.TrimRight(publicURL, "/")
+	return s
 }
 
 // WithConsole serves the built console app from dir. The console is static
@@ -119,6 +132,12 @@ type providerJSON struct {
 	SetupURL        string           `json:"setup_url,omitempty"`
 	DocsURL         string           `json:"docs_url,omitempty"`
 	OAuthAvailable  bool             `json:"oauth_available"`
+	SetupLinks      []setupLinkJSON  `json:"setup_links,omitempty"`
+}
+
+type setupLinkJSON struct {
+	Label string `json:"label"`
+	URL   string `json:"url"`
 }
 
 type capabilityJSON struct {
@@ -137,6 +156,9 @@ func (s *Server) listProviders(w http.ResponseWriter, _ *http.Request, _ core.Su
 	for _, d := range descriptors {
 		_, oauthAvailable := s.oauthApps[d.Name]
 		p := providerJSON{Name: d.Name, DisplayName: d.DisplayName, CredentialTypes: d.CredentialTypes, SetupURL: d.SetupURL, DocsURL: d.DocsURL, OAuthAvailable: oauthAvailable}
+		for _, link := range d.SetupLinks {
+			p.SetupLinks = append(p.SetupLinks, setupLinkJSON{Label: link.Label, URL: link.URL})
+		}
 		for _, c := range d.Capabilities {
 			p.Capabilities = append(p.Capabilities, capabilityJSON{
 				Capability: string(c.Capability), Dimensions: c.Dimensions, Metrics: c.Metrics,
@@ -147,6 +169,14 @@ func (s *Server) listProviders(w http.ResponseWriter, _ *http.Request, _ core.Su
 		out = append(out, p)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"providers": out})
+}
+
+func (s *Server) getSite(w http.ResponseWriter, _ *http.Request, _ core.Subject) {
+	writeJSON(w, http.StatusOK, map[string]string{
+		"public_url":     s.site.PublicURL,
+		"sitemap_url":    s.site.SitemapURL,
+		"oauth_callback": strings.TrimRight(s.platformURL, "/") + "/oauth/callback",
+	})
 }
 
 // connectionJSON exposes state only: "configured" plus credential type and
@@ -249,7 +279,7 @@ func runToJSON(r core.SyncRun) syncRunJSON {
 
 func (s *Server) listSyncRuns(w http.ResponseWriter, r *http.Request, _ core.Subject) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
-	rows, err := s.store.ListSyncRuns(r.Context(), r.URL.Query().Get("provider"), limit)
+	rows, err := s.store.ListSyncRuns(r.Context(), s.site.ID, r.URL.Query().Get("provider"), limit)
 	if err != nil {
 		s.logger.Error("list sync runs", "error", err)
 		writeError(w, http.StatusInternalServerError, "list sync runs")
@@ -260,6 +290,42 @@ func (s *Server) listSyncRuns(w http.ResponseWriter, r *http.Request, _ core.Sub
 		out = append(out, runToJSON(row))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"sync_runs": out})
+}
+
+func (s *Server) listReportDatasets(w http.ResponseWriter, r *http.Request, _ core.Subject) {
+	datasets, err := s.store.ListReportDatasets(r.Context(), s.site.ID)
+	if err != nil {
+		s.logger.Error("list report datasets", "error", err)
+		writeError(w, http.StatusInternalServerError, "list report datasets")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"datasets": datasets})
+}
+
+func (s *Server) listReportRows(w http.ResponseWriter, r *http.Request, _ core.Subject) {
+	dataset := r.URL.Query().Get("dataset")
+	if dataset == "" {
+		writeError(w, http.StatusBadRequest, "dataset is required")
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	rows, err := s.store.ListReportRows(r.Context(), s.site.ID, dataset, limit)
+	if err != nil {
+		s.logger.Error("list report rows", "dataset", dataset, "error", err)
+		writeError(w, http.StatusInternalServerError, "list report rows")
+		return
+	}
+	type reportRowJSON struct {
+		Dataset   string         `json:"dataset"`
+		Key       string         `json:"key"`
+		Data      map[string]any `json:"data"`
+		UpdatedAt string         `json:"updated_at"`
+	}
+	out := make([]reportRowJSON, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, reportRowJSON{Dataset: row.Dataset, Key: row.Key, Data: row.Data, UpdatedAt: row.UpdatedAt.UTC().Format(time.RFC3339)})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"rows": out})
 }
 
 type createSyncRunJSON struct {

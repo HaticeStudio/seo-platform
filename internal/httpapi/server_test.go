@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/HaticeStudio/seo-platform/core"
 	"github.com/HaticeStudio/seo-platform/internal/registry"
@@ -68,6 +69,58 @@ func TestScopeEnforced(t *testing.T) {
 	}
 }
 
+func TestReportRowsAreReadableAndSiteScoped(t *testing.T) {
+	server, st, _, site := newTestServer(t, core.Subject{ID: "u", Scopes: []string{core.ScopeRead}})
+	ctx := context.Background()
+	if err := st.UpsertReportRows(ctx, site.ID, "search/daily", []map[string]any{{"_key": "2026-08-18", "clicks": 4}}); err != nil {
+		t.Fatal(err)
+	}
+	other := core.Site{ID: "other", PublicURL: "https://other.example.test"}
+	if err := st.EnsureSite(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertReportRows(ctx, other.ID, "search/daily", []map[string]any{{"_key": "2026-08-18", "clicks": 99}}); err != nil {
+		t.Fatal(err)
+	}
+	rec := do(t, server, "GET", "/api/v0/report-rows?dataset=search%2Fdaily", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("report rows: %d %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"clicks":4`) || strings.Contains(rec.Body.String(), `"clicks":99`) {
+		t.Fatalf("site scope leaked: %s", rec.Body.String())
+	}
+}
+
+func TestSyncRunsAndIdempotencyAreSiteScoped(t *testing.T) {
+	server, st, _, site := newTestServer(t, core.Subject{ID: "u", Scopes: []string{core.ScopeRead}})
+	ctx := context.Background()
+	other := core.Site{ID: "other", PublicURL: "https://other.example.test"}
+	if err := st.EnsureSite(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+	base := core.SyncRun{
+		Provider: "fake-search", Capability: core.CapSearchPerformance,
+		StartDate:      time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC),
+		EndDate:        time.Date(2026, 8, 2, 0, 0, 0, 0, time.UTC),
+		IdempotencyKey: "same-client-key",
+	}
+	first, inserted, err := st.CreateSyncRun(ctx, base, site.ID)
+	if err != nil || !inserted {
+		t.Fatalf("create default run: inserted=%v err=%v", inserted, err)
+	}
+	second, inserted, err := st.CreateSyncRun(ctx, base, other.ID)
+	if err != nil || !inserted {
+		t.Fatalf("same idempotency key in another site: inserted=%v err=%v", inserted, err)
+	}
+	rec := do(t, server, "GET", "/api/v0/sync-runs", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("sync runs: %d %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), first.ID) || strings.Contains(rec.Body.String(), second.ID) {
+		t.Fatalf("site scope leaked: %s", rec.Body.String())
+	}
+}
+
 func TestConnectionResponseNeverContainsSecret(t *testing.T) {
 	subject := core.Subject{ID: "u", Scopes: []string{core.ScopeRead}}
 	server, st, sec, site := newTestServer(t, subject)
@@ -117,6 +170,25 @@ func TestProvidersEndpointExposesDescriptors(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), "search.performance") {
 		t.Errorf("capabilities missing from response: %s", rec.Body.String())
+	}
+}
+
+func TestSiteEndpointExposesOnlyNonSecretSetupValues(t *testing.T) {
+	server, _, _, _ := newTestServer(t, core.Subject{ID: "u", Scopes: []string{core.ScopeRead}})
+	server.WithPlatformURL("https://seo.example.test")
+	rec := do(t, server, "GET", "/api/v0/site", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body.String())
+	}
+	for _, value := range []string{"https://example.test", "https://seo.example.test/oauth/callback"} {
+		if !strings.Contains(rec.Body.String(), value) {
+			t.Errorf("setup value %q missing: %s", value, rec.Body.String())
+		}
+	}
+	for _, forbidden := range []string{"credential", "secret", "token"} {
+		if strings.Contains(strings.ToLower(rec.Body.String()), forbidden) {
+			t.Errorf("site response contains secret-shaped field %q: %s", forbidden, rec.Body.String())
+		}
 	}
 }
 

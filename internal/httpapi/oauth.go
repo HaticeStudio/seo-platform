@@ -52,17 +52,31 @@ func (s *Server) oauthStart(w http.ResponseWriter, r *http.Request, subject core
 		return
 	}
 	redirect, err := url.Parse(strings.TrimSpace(req.RedirectURI))
-	if err != nil || !redirect.IsAbs() || (redirect.Scheme != "https" && redirect.Hostname() != "localhost" && redirect.Hostname() != "127.0.0.1") {
+	if err != nil || !redirect.IsAbs() || redirect.User != nil || redirect.Fragment != "" || (redirect.Scheme != "https" && !isLoopbackHost(redirect.Hostname())) {
 		writeError(w, http.StatusBadRequest, "redirect_uri must be absolute and https (or loopback)")
 		return
 	}
+	platformURL, platformErr := url.Parse(s.platformURL)
+	if platformErr != nil || origin(redirect) != origin(platformURL) {
+		writeError(w, http.StatusBadRequest, "redirect_uri must use the configured platform origin")
+		return
+	}
 
-	state := randomToken(32)
-	verifier := randomToken(48)
+	state, err := randomToken(32)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "create authorization state")
+		return
+	}
+	verifier, err := randomToken(48)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "create authorization state")
+		return
+	}
 	if err := s.store.CreateOAuthState(r.Context(), store.OAuthState{
 		State:        state,
 		Provider:     provider,
 		SiteID:       s.site.ID,
+		SubjectID:    subject.ID,
 		PKCEVerifier: verifier,
 		RedirectURI:  redirect.String(),
 	}, oauthStateTTL); err != nil {
@@ -91,6 +105,17 @@ func (s *Server) oauthStart(w http.ResponseWriter, r *http.Request, subject core
 	writeJSON(w, http.StatusOK, map[string]string{"authorize_url": authorizeURL, "state": state})
 }
 
+func origin(parsed *url.URL) string {
+	if parsed == nil {
+		return ""
+	}
+	return strings.ToLower(parsed.Scheme + "://" + parsed.Host)
+}
+
+func isLoopbackHost(host string) bool {
+	return strings.EqualFold(host, "localhost") || host == "127.0.0.1" || host == "::1"
+}
+
 func (s *Server) oauthComplete(w http.ResponseWriter, r *http.Request, subject core.Subject) {
 	provider := r.PathValue("provider")
 	app, ok := s.oauthApps[provider]
@@ -106,7 +131,7 @@ func (s *Server) oauthComplete(w http.ResponseWriter, r *http.Request, subject c
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	pending, err := s.store.ConsumeOAuthState(r.Context(), strings.TrimSpace(req.State))
+	pending, err := s.store.ConsumeOAuthState(r.Context(), strings.TrimSpace(req.State), provider, s.site.ID, subject.ID)
 	if err != nil {
 		if errors.Is(err, store.ErrOAuthStateInvalid) {
 			s.audit(r, subject, "connection.oauth.complete", provider, "invalid_state")
@@ -116,7 +141,7 @@ func (s *Server) oauthComplete(w http.ResponseWriter, r *http.Request, subject c
 		writeError(w, http.StatusInternalServerError, "read oauth state")
 		return
 	}
-	if pending.Provider != provider || pending.SiteID != s.site.ID {
+	if pending.Provider != provider || pending.SiteID != s.site.ID || pending.SubjectID != subject.ID {
 		s.audit(r, subject, "connection.oauth.complete", provider, "state_mismatch")
 		writeError(w, http.StatusBadRequest, "authorization state does not match this provider")
 		return
@@ -166,10 +191,10 @@ func (s *Server) oauthComplete(w http.ResponseWriter, r *http.Request, subject c
 	s.finishCredentialUpdate(w, r, subject, provider, connection, ref)
 }
 
-func randomToken(bytes int) string {
+func randomToken(bytes int) (string, error) {
 	buf := make([]byte, bytes)
 	if _, err := rand.Read(buf); err != nil {
-		panic(err) // crypto/rand failure is not recoverable
+		return "", err
 	}
-	return base64.RawURLEncoding.EncodeToString(buf)
+	return base64.RawURLEncoding.EncodeToString(buf), nil
 }

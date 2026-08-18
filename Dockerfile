@@ -14,12 +14,13 @@ RUN npm run build
 
 FROM alpine:3.20
 RUN addgroup -S seo && adduser -S seo -G seo && apk add --no-cache ca-certificates \
-    && mkdir -p /app/data && chown -R seo:seo /app
+    && mkdir -p /app/data /app/keys /app/auth /app/bootstrap \
+    && chown -R seo:seo /app
 USER seo
 WORKDIR /app
 COPY --from=build /out/seo-platform /usr/local/bin/seo-platform
 COPY --from=console /console/dist/app /app/console
 ENV SEO_CONSOLE_DIR=/app/console
-VOLUME ["/app/data"]
+VOLUME ["/app/data", "/app/keys", "/app/auth", "/app/bootstrap"]
 EXPOSE 8080
 ENTRYPOINT ["seo-platform"]

@@ -65,7 +65,7 @@ func waitStatus(t *testing.T, st *store.Store, id string, want ...core.SyncRunSt
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		run, err := st.GetSyncRun(context.Background(), id)
+		run, err := st.GetSyncRun(context.Background(), "default", id)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -249,7 +249,7 @@ func TestSchedulerTickRunsConfigured(t *testing.T) {
 	f := newFixture(t)
 	f.configure(t)
 	f.engine.tick(context.Background())
-	runs, err := f.store.ListSyncRuns(context.Background(), fakeProvider, 10)
+	runs, err := f.store.ListSyncRuns(context.Background(), "default", fakeProvider, 10)
 	if err != nil {
 		t.Fatal(err)
 	}

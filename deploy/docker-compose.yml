@@ -1,23 +1,30 @@
 # Single-site Quick Start. Every tunable the server understands is passed
 # through here explicitly so nothing is silently defaulted away in production.
 #
-# Required in .env (never commit it):
-#   SEO_PUBLIC_URL=https://www.example.com
-#   SEO_SECRETS_MASTER_KEY=<openssl rand -hex 32>
-#   SEO_API_KEYS=<sha256-of-key>=read,sync,connections.manage
+# Required in .env: SEO_PUBLIC_URL=https://www.example.com
 services:
   seo-platform:
+    image: ghcr.io/haticestudio/seo-platform:${SEO_PLATFORM_VERSION:-v0.1.0}
     build:
       context: ..
     environment:
       SEO_PUBLIC_URL: ${SEO_PUBLIC_URL:?set the site public URL}
+      SEO_BASE_URL: ${SEO_BASE_URL:-${SEO_PUBLIC_URL}}
       SEO_SITEMAP_URL: ${SEO_SITEMAP_URL:-}
       SEO_TIMEZONE: ${SEO_TIMEZONE:-UTC}
       SEO_LISTEN: 0.0.0.0:8080
       SEO_DB_PATH: /app/data/seo.db
       SEO_SECRETS_DIR: /app/data/secrets
-      SEO_SECRETS_MASTER_KEY: ${SEO_SECRETS_MASTER_KEY:?generate with openssl rand -hex 32}
-      SEO_API_KEYS: ${SEO_API_KEYS:?provide sha256(key)=scopes}
+      SEO_SECRETS_MASTER_KEY: ${SEO_SECRETS_MASTER_KEY:-}
+      SEO_SECRETS_KEY_FILE: /app/keys/master-key
+      SEO_API_KEYS: ${SEO_API_KEYS:-}
+      SEO_API_KEY_HASH_FILE: /app/auth/admin-api-key.sha256
+      SEO_BOOTSTRAP_TOKEN_FILE: /app/bootstrap/admin-api-key
+      SEO_DEV_AUTH: ${SEO_DEV_AUTH:-false}
+      SEO_GA4_CONVERSION_EVENTS: ${SEO_GA4_CONVERSION_EVENTS:-}
+      SEO_GOOGLE_OAUTH_CLIENT_ID: ${SEO_GOOGLE_OAUTH_CLIENT_ID:-}
+      SEO_GOOGLE_OAUTH_CLIENT_SECRET: ${SEO_GOOGLE_OAUTH_CLIENT_SECRET:-}
+      SEO_CONSOLE_DIR: ${SEO_CONSOLE_DIR:-/app/console}
       SEO_SYNC_LOOKBACK_DAYS: ${SEO_SYNC_LOOKBACK_DAYS:-30}
       SEO_SYNC_TIMEOUT: ${SEO_SYNC_TIMEOUT:-10m}
       SEO_SYNC_INTERVAL: ${SEO_SYNC_INTERVAL:-24h}
@@ -26,6 +33,16 @@ services:
       - "127.0.0.1:8080:8080"
     volumes:
       - seo-data:/app/data
+      - seo-keys:/app/keys
+      - seo-auth:/app/auth
+      - seo-bootstrap:/app/bootstrap
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:8080/healthz"]
       interval: 30s
@@ -34,3 +51,6 @@ services:
 
 volumes:
   seo-data:
+  seo-keys:
+  seo-auth:
+  seo-bootstrap:

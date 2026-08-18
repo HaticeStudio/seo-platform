@@ -47,6 +47,9 @@ func NewFile(dir, masterKeyHex string) (*File, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create secret store dir: %w", err)
 	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return nil, fmt.Errorf("secure secret store dir: %w", err)
+	}
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -111,11 +114,28 @@ func (f *File) open(payload filePayload) (core.SecretMaterial, error) {
 }
 
 func (f *File) write(id string, data []byte) error {
-	tmp := f.path(id) + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+	tmp, err := os.CreateTemp(f.dir, ".credential-*")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, f.path(id))
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, f.path(id))
 }
 
 func (f *File) Put(_ context.Context, scope core.Scope, material core.SecretMaterial) (core.CredentialRef, error) {
@@ -132,7 +152,7 @@ func (f *File) Put(_ context.Context, scope core.Scope, material core.SecretMate
 	return core.CredentialRef{ID: id, Type: material.Type}, nil
 }
 
-func (f *File) Open(_ context.Context, ref core.CredentialRef, _ core.AccessPurpose) (core.CredentialHandle, error) {
+func (f *File) Open(_ context.Context, scope core.Scope, ref core.CredentialRef, _ core.AccessPurpose) (core.CredentialHandle, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	payload, err := f.load(ref.ID)
@@ -142,6 +162,9 @@ func (f *File) Open(_ context.Context, ref core.CredentialRef, _ core.AccessPurp
 	if payload.Revoked {
 		return nil, fmt.Errorf("credential %s is revoked", ref.ID)
 	}
+	if payload.Scope != scope {
+		return nil, fmt.Errorf("credential scope does not match")
+	}
 	material, err := f.open(payload)
 	if err != nil {
 		return nil, err
@@ -149,7 +172,7 @@ func (f *File) Open(_ context.Context, ref core.CredentialRef, _ core.AccessPurp
 	return &handle{material: material}, nil
 }
 
-func (f *File) Rotate(_ context.Context, ref core.CredentialRef, replacement core.SecretMaterial) error {
+func (f *File) Rotate(_ context.Context, scope core.Scope, ref core.CredentialRef, replacement core.SecretMaterial) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	payload, err := f.load(ref.ID)
@@ -159,6 +182,9 @@ func (f *File) Rotate(_ context.Context, ref core.CredentialRef, replacement cor
 	if payload.Revoked {
 		return fmt.Errorf("credential %s is revoked", ref.ID)
 	}
+	if payload.Scope != scope {
+		return fmt.Errorf("credential scope does not match")
+	}
 	data, err := f.seal(payload.Scope, replacement, false)
 	if err != nil {
 		return err
@@ -166,12 +192,15 @@ func (f *File) Rotate(_ context.Context, ref core.CredentialRef, replacement cor
 	return f.write(ref.ID, data)
 }
 
-func (f *File) Revoke(_ context.Context, ref core.CredentialRef) error {
+func (f *File) Revoke(_ context.Context, scope core.Scope, ref core.CredentialRef) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	payload, err := f.load(ref.ID)
 	if err != nil {
 		return nil // already gone: revoke is idempotent
+	}
+	if payload.Scope != scope {
+		return fmt.Errorf("credential scope does not match")
 	}
 	// Tombstone: keep scope and type, drop the material entirely.
 	data, err := f.seal(payload.Scope, core.SecretMaterial{Type: payload.Type}, true)

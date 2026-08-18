@@ -1,0 +1,9 @@
+.git
+.github
+.env
+*.key
+*.pem
+data
+release
+console/node_modules
+console/dist

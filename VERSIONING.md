@@ -12,13 +12,14 @@
 ## What is public API
 
 - The HTTP API under `/api/v0` (later `/api/v1`).
-- Go packages `core/` and `providertest/`. Everything under `internal/` is
-  explicitly not public API.
+- Go packages `core/`, `providertest/`, and `sdk/go/seo`. Everything under
+  `internal/` is explicitly not public API.
+- The React package exported from `console/src/index.ts`.
 - Provider capability names (`search.performance`, `index.sitemaps`, …).
   New capabilities may be added at any time; a published name is never
   re-interpreted to mean something else.
-- Migration files: forward-only, each file idempotent. Released migrations
-  are never edited; fixes ship as new migrations.
+- Migration files: forward-only and transactionally recorded exactly once.
+  Released migrations are never edited; fixes ship as new migrations.
 
 ## Compatibility rules
 

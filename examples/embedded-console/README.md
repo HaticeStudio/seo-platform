@@ -7,7 +7,7 @@ trust. The host never touches provider credentials.
 
 ```tsx
 import { SeoConsole, type AuthClient } from '@haticestudio/seo-console'
-import '@haticestudio/seo-console/dist/lib/seo-console.css'
+import '@haticestudio/seo-console/style.css'
 
 const auth: AuthClient = {
   // Exchange the host session for a short-lived seo-platform token.

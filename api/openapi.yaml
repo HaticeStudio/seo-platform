@@ -1,0 +1,389 @@
+openapi: 3.1.0
+info:
+  title: seo-platform API
+  version: 0.1.0
+  description: Versioned host-neutral API. Credential material is write-only.
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+servers:
+  - url: http://127.0.0.1:8080
+security:
+  - bearerAuth: []
+paths:
+  /healthz:
+    get:
+      summary: Check process health
+      operationId: health
+      security: []
+      responses:
+        '200': {description: Process is running}
+        '4XX': {$ref: '#/components/responses/Error'}
+  /readyz:
+    get:
+      summary: Check persistence readiness
+      operationId: readiness
+      security: []
+      responses:
+        '200': {description: Persistence is ready}
+        '503': {$ref: '#/components/responses/Error'}
+        '4XX': {$ref: '#/components/responses/Error'}
+  /api/v0/providers:
+    get:
+      summary: List provider descriptors
+      operationId: listProviders
+      responses:
+        '200':
+          description: Registered providers and their honest capabilities
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [providers]
+                properties:
+                  providers: {type: array, items: {$ref: '#/components/schemas/Provider'}}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /api/v0/site:
+    get:
+      summary: Get non-secret site setup values
+      operationId: getSite
+      responses:
+        '200':
+          description: Public site, sitemap, and OAuth callback URLs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [public_url, sitemap_url, oauth_callback]
+                properties:
+                  public_url: {type: string, format: uri}
+                  sitemap_url: {type: string, format: uri}
+                  oauth_callback: {type: string, format: uri}
+        '401': {$ref: '#/components/responses/Error'}
+  /api/v0/connections:
+    get:
+      summary: List provider connection states
+      operationId: listConnections
+      responses:
+        '200':
+          description: Connection state; never credential material
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [connections]
+                properties:
+                  connections: {type: array, items: {$ref: '#/components/schemas/Connection'}}
+        '401': {$ref: '#/components/responses/Error'}
+  /api/v0/connections/{provider}/credential:
+    put:
+      summary: Validate and replace a provider credential
+      operationId: setCredential
+      parameters: [{$ref: '#/components/parameters/Provider'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [credential_type, material]
+              properties:
+                credential_type: {type: string}
+                material: {type: string, writeOnly: true}
+      responses:
+        '200': {$ref: '#/components/responses/Configured'}
+        '400': {$ref: '#/components/responses/Error'}
+        '502': {$ref: '#/components/responses/Error'}
+  /api/v0/connections/{provider}/properties:
+    get:
+      summary: Discover provider properties
+      operationId: listProperties
+      parameters: [{$ref: '#/components/parameters/Provider'}]
+      responses:
+        '200':
+          description: Properties visible to the configured credential
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [properties]
+                properties:
+                  properties: {type: array, items: {$ref: '#/components/schemas/Property'}}
+        '409': {$ref: '#/components/responses/Error'}
+  /api/v0/connections/{provider}/property:
+    put:
+      summary: Validate and select a provider property
+      operationId: setProperty
+      parameters: [{$ref: '#/components/parameters/Provider'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [property_reference]
+              properties:
+                property_reference: {type: string}
+      responses:
+        '200': {$ref: '#/components/responses/Configured'}
+        '409': {$ref: '#/components/responses/Error'}
+        '502': {$ref: '#/components/responses/Error'}
+  /api/v0/connections/{provider}/test:
+    post:
+      summary: Test a configured provider connection
+      operationId: testConnection
+      parameters: [{$ref: '#/components/parameters/Provider'}]
+      responses:
+        '200':
+          description: Classified provider connection test
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok: {type: boolean}
+                  error: {type: string}
+        '409': {$ref: '#/components/responses/Error'}
+  /api/v0/connections/{provider}:
+    delete:
+      summary: Revoke and disconnect a provider
+      operationId: revokeConnection
+      parameters: [{$ref: '#/components/parameters/Provider'}]
+      responses:
+        '200': {$ref: '#/components/responses/Configured'}
+        '404': {$ref: '#/components/responses/Error'}
+  /api/v0/connections/{provider}/oauth/start:
+    post:
+      summary: Start an OAuth authorization with PKCE
+      operationId: startOAuth
+      parameters: [{$ref: '#/components/parameters/Provider'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [redirect_uri]
+              properties:
+                redirect_uri: {type: string, format: uri}
+      responses:
+        '200':
+          description: Provider authorization URL and opaque single-use state
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [authorize_url, state]
+                properties:
+                  authorize_url: {type: string, format: uri}
+                  state: {type: string}
+        '400': {$ref: '#/components/responses/Error'}
+  /api/v0/connections/{provider}/oauth/complete:
+    post:
+      summary: Complete an OAuth authorization
+      operationId: completeOAuth
+      parameters: [{$ref: '#/components/parameters/Provider'}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state, code]
+              properties:
+                state: {type: string, writeOnly: true}
+                code: {type: string, writeOnly: true}
+      responses:
+        '200': {$ref: '#/components/responses/Configured'}
+        '400': {$ref: '#/components/responses/Error'}
+        '502': {$ref: '#/components/responses/Error'}
+  /api/v0/sync-runs:
+    get:
+      summary: List synchronization runs
+      operationId: listSyncRuns
+      parameters:
+        - {name: provider, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 1000}}
+      responses:
+        '200':
+          description: Recent sync runs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sync_runs]
+                properties:
+                  sync_runs: {type: array, items: {$ref: '#/components/schemas/SyncRun'}}
+        '401': {$ref: '#/components/responses/Error'}
+    post:
+      summary: Start or resume an idempotent synchronization
+      operationId: createSyncRun
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreateSyncRun'}
+      responses:
+        '202':
+          description: Accepted or matched an idempotent existing run
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sync_run, already_running]
+                properties:
+                  sync_run: {$ref: '#/components/schemas/SyncRun'}
+                  already_running: {type: boolean}
+        '400': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /api/v0/report-datasets:
+    get:
+      summary: List available report datasets
+      operationId: listReportDatasets
+      responses:
+        '200':
+          description: Available normalized datasets
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [datasets]
+                properties:
+                  datasets: {type: array, items: {type: string}}
+        '401': {$ref: '#/components/responses/Error'}
+  /api/v0/report-rows:
+    get:
+      summary: List rows in a report dataset
+      operationId: listReportRows
+      parameters:
+        - {name: dataset, in: query, required: true, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 1000}}
+      responses:
+        '200':
+          description: Site-scoped rows for one normalized dataset
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [rows]
+                properties:
+                  rows: {type: array, items: {$ref: '#/components/schemas/ReportRow'}}
+        '400': {$ref: '#/components/responses/Error'}
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer}
+  parameters:
+    Provider:
+      name: provider
+      in: path
+      required: true
+      schema: {type: string}
+  responses:
+    Error:
+      description: Error response
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties: {error: {type: string}}
+    Configured:
+      description: Updated connection state and optional discovered properties
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [configured]
+            properties:
+              configured: {type: boolean}
+              property_reference: {type: string}
+              property_discovery_error: {type: string}
+              properties: {type: array, items: {$ref: '#/components/schemas/Property'}}
+  schemas:
+    Property:
+      type: object
+      required: [reference, display_name]
+      properties:
+        reference: {type: string}
+        display_name: {type: string}
+    Capability:
+      type: object
+      required: [capability, supports_cursor]
+      properties:
+        capability: {type: string}
+        dimensions: {type: array, items: {type: string}}
+        metrics: {type: array, items: {type: string}}
+        max_range_days: {type: integer}
+        freshness_lag_days: {type: integer}
+        supports_cursor: {type: boolean}
+        quota_hint: {type: string}
+    Provider:
+      type: object
+      required: [name, display_name, credential_types, capabilities, oauth_available]
+      properties:
+        name: {type: string}
+        display_name: {type: string}
+        credential_types: {type: array, items: {type: string}}
+        capabilities: {type: array, items: {$ref: '#/components/schemas/Capability'}}
+        setup_url: {type: string, format: uri}
+        docs_url: {type: string, format: uri}
+        oauth_available: {type: boolean}
+        setup_links:
+          type: array
+          items:
+            type: object
+            required: [label, url]
+            properties:
+              label: {type: string}
+              url: {type: string, format: uri}
+    Connection:
+      type: object
+      required: [provider, configured, enabled, state]
+      properties:
+        provider: {type: string}
+        configured: {type: boolean}
+        enabled: {type: boolean}
+        credential_type: {type: string}
+        property_reference: {type: string}
+        state: {type: string, enum: [not_configured, error, stale, no_data, connected]}
+        last_success_at: {type: string, format: date-time}
+        data_through_date: {type: string, format: date}
+        last_error_code: {type: string}
+        last_error_message: {type: string}
+    SyncRun:
+      type: object
+      required: [id, provider, capability, start_date, end_date, status, rows_synced, idempotency_key, started_at]
+      properties:
+        id: {type: string}
+        provider: {type: string}
+        capability: {type: string}
+        start_date: {type: string, format: date}
+        end_date: {type: string, format: date}
+        status: {type: string, enum: [QUEUED, RUNNING, SUCCEEDED, PARTIAL, FAILED]}
+        rows_synced: {type: integer, format: int64}
+        cursor: {type: string}
+        triggered_by: {type: string}
+        idempotency_key: {type: string}
+        error_code: {type: string}
+        error_message: {type: string}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time}
+    CreateSyncRun:
+      type: object
+      required: [provider, capability]
+      properties:
+        provider: {type: string}
+        capability: {type: string}
+        start_date: {type: string, format: date}
+        end_date: {type: string, format: date}
+        idempotency_key: {type: string}
+    ReportRow:
+      type: object
+      required: [dataset, key, data, updated_at]
+      properties:
+        dataset: {type: string}
+        key: {type: string}
+        data: {type: object, additionalProperties: true}
+        updated_at: {type: string, format: date-time}
