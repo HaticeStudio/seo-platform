@@ -25,6 +25,7 @@ import (
 	"github.com/HaticeStudio/seo-platform/internal/secrets"
 	"github.com/HaticeStudio/seo-platform/internal/store"
 	syncengine "github.com/HaticeStudio/seo-platform/internal/sync"
+	"github.com/HaticeStudio/seo-platform/providers/bing"
 )
 
 func main() {
@@ -92,9 +93,12 @@ func run(logger *slog.Logger) error {
 		return errors.New("no auth configured: set SEO_API_KEYS, or SEO_DEV_AUTH=true for loopback development")
 	}
 
+	// The standalone binary ships every provider; each stays not_configured
+	// (and costs nothing) until an administrator adds credentials.
 	reg := registry.New()
-	// Provider packages register here as they are added (issues #271/#277/#278):
-	//   reg.Register(searchconsole.New(...))
+	if err := reg.Register(bing.New()); err != nil {
+		return err
+	}
 
 	for _, d := range reg.Descriptors() {
 		if err := st.EnsureConnection(ctx, site.ID, d.Name); err != nil {
