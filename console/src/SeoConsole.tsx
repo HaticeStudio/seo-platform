@@ -69,6 +69,7 @@ type ConsoleCopy = ReturnType<typeof copyFor>
 function setupLinkLabel(kind: string | undefined, fallback: string, text: ConsoleCopy): string {
   if (text !== COPY.zh) return fallback
   return ({
+    web_property: '建立網站 GA4 Property',
     console: '開啟官方管理平台',
     enable_api: '啟用必要 API',
     credentials: '建立／管理憑證',
@@ -80,6 +81,7 @@ function setupLinkLabel(kind: string | undefined, fallback: string, text: Consol
 function setupLinkDescription(kind: string | undefined, fallback: string | undefined, text: ConsoleCopy): string | undefined {
   if (text !== COPY.zh) return fallback
   return ({
+    web_property: '建立或選擇本網站專用的 GA4 Property，並新增「網站」資料串流；不要使用 Firebase／Android App Property。',
     console: '開啟官方平台，確認資源與資料狀態。',
     enable_api: '在持有 OAuth 用戶端的 Google Cloud 專案啟用必要 API。',
     credentials: '建立或管理 OAuth 用戶端、service account 或 API Key。',

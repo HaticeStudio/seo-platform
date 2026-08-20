@@ -169,7 +169,10 @@ describe('SeoConsole', () => {
 				credential_types: ['oauth2', 'service_account_json'],
 				capabilities: [{ capability: 'analytics.acquisition', supports_cursor: false }],
 				setup_url: 'https://analytics.google.com/analytics/web/',
-				setup_links: [{ kind: 'permissions', label: 'Google Analytics Admin', url: 'https://analytics.google.com/analytics/web/#/a/admin' }],
+				setup_links: [
+					{ kind: 'web_property', label: 'Create a website GA4 property', url: 'https://support.google.com/analytics/answer/9304153' },
+					{ kind: 'permissions', label: 'Google Analytics Admin', url: 'https://analytics.google.com/analytics/web/#/a/admin' },
+				],
 				oauth_available: false,
 			}],
 		}
@@ -183,6 +186,8 @@ describe('SeoConsole', () => {
 			expect(screen.getByText('等待選擇 Property')).toBeTruthy()
 			expect(screen.getByText(/既有憑證已在後端加密保存/)).toBeTruthy()
 			fireEvent.click(screen.getByRole('button', { name: '繼續設定' }))
+			expect(screen.getByRole('link', { name: /建立網站 GA4 Property/ })).toBeTruthy()
+			expect(screen.getByText(/不要使用 Firebase／Android App Property/)).toBeTruthy()
 			expect(screen.getByRole('button', { name: '重新取得 Property' })).toBeTruthy()
 			expect(screen.getByText(/無法使用 OAuth/)).toBeTruthy()
 			expect(screen.queryByText(/Bing Webmaster/)).toBeNull()
