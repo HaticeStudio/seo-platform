@@ -97,3 +97,89 @@ func TestRuntimeRequiresHostSecurityBoundaries(t *testing.T) {
 		t.Fatal("expected missing host authenticator error")
 	}
 }
+
+func TestRuntimeImportsExistingHostCredentialWithoutBrowserRoundTrip(t *testing.T) {
+	provider := providertest.NewFake("fake-search")
+	runtime, err := platform.New(context.Background(), platform.Config{
+		Site: core.Site{
+			ID: "host-site", PublicURL: "https://example.test",
+			SitemapURL: "https://example.test/sitemap.xml",
+		},
+		StorePath: filepath.Join(t.TempDir(), "seo.db"),
+		Secrets:   secrets.NewMemory(),
+		Authenticator: platform.AuthenticateFunc(func(*http.Request) (core.Subject, error) {
+			return core.Subject{ID: "host-admin", Scopes: []string{core.ScopeRead}}, nil
+		}),
+		Providers: []core.Provider{provider},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runtime.Close() })
+
+	result, err := runtime.ImportConnection(context.Background(), platform.ImportConnectionRequest{
+		Provider: "fake-search",
+		Credential: core.SecretMaterial{
+			Type: "api_key", Bytes: []byte("existing-host-secret"),
+		},
+		PropertyReference: "fake-property",
+		Actor:             "host-migration",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Imported || !result.Connection.Enabled || result.Connection.PropertyReference != "fake-property" {
+		t.Fatalf("import result = %+v", result)
+	}
+	if len(result.Properties) != 1 || result.Properties[0].Reference != "fake-property" {
+		t.Fatalf("discovered properties = %+v", result.Properties)
+	}
+
+	// Startup reconciliation is create-only. A second call must not rotate the
+	// secret an administrator may already have changed through the Console.
+	second, err := runtime.ImportConnection(context.Background(), platform.ImportConnectionRequest{
+		Provider: "fake-search",
+		Credential: core.SecretMaterial{
+			Type: "api_key", Bytes: []byte("must-not-replace"),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Imported || second.Connection.CredentialRef != result.Connection.CredentialRef {
+		t.Fatalf("idempotent import = %+v, want existing ref", second)
+	}
+}
+
+func TestRuntimeImportCanLeavePropertySelectionToConsole(t *testing.T) {
+	runtime, err := platform.New(context.Background(), platform.Config{
+		Site: core.Site{
+			ID: "host-site", PublicURL: "https://example.test",
+			SitemapURL: "https://example.test/sitemap.xml",
+		},
+		StorePath: filepath.Join(t.TempDir(), "seo.db"),
+		Secrets:   secrets.NewMemory(),
+		Authenticator: platform.AuthenticateFunc(func(*http.Request) (core.Subject, error) {
+			return core.Subject{ID: "host-admin", Scopes: []string{core.ScopeRead}}, nil
+		}),
+		Providers: []core.Provider{providertest.NewFake("fake-search")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runtime.Close() })
+
+	result, err := runtime.ImportConnection(context.Background(), platform.ImportConnectionRequest{
+		Provider:   "fake-search",
+		Credential: core.SecretMaterial{Type: "api_key", Bytes: []byte("existing-host-secret")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Imported || result.Connection.Enabled || result.Connection.PropertyReference != "" {
+		t.Fatalf("import result = %+v", result)
+	}
+	if len(result.Properties) != 1 {
+		t.Fatalf("properties = %+v", result.Properties)
+	}
+}

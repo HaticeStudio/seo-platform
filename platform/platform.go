@@ -55,6 +55,26 @@ type SyncConfig struct {
 	Lease        time.Duration
 }
 
+// ImportConnectionRequest lets an embedding host move an existing provider
+// credential into the module-owned SecretStore without sending that material
+// through a browser. It is intentionally create-only: an already configured
+// connection is never rotated or overwritten by startup reconciliation.
+type ImportConnectionRequest struct {
+	Provider          string
+	Credential        core.SecretMaterial
+	PropertyReference string
+	Actor             string
+}
+
+// ImportConnectionResult reports whether this call imported the credential.
+// Properties contains the provider-side choices visible to that credential so
+// the host can leave final property selection to the embedded Console.
+type ImportConnectionResult struct {
+	Imported   bool
+	Connection core.ProviderConnection
+	Properties []core.Property
+}
+
 // Config wires one embedded runtime into a host application.
 type Config struct {
 	Site core.Site
@@ -79,9 +99,13 @@ type Config struct {
 // Runtime is an in-process module. Mount Handler in the host router, call
 // Start with the host lifecycle context, and Close during host shutdown.
 type Runtime struct {
-	store   *store.Store
-	engine  *syncengine.Engine
-	handler http.Handler
+	store    *store.Store
+	registry *registry.Registry
+	secrets  core.SecretStore
+	site     core.Site
+	logger   *slog.Logger
+	engine   *syncengine.Engine
+	handler  http.Handler
 }
 
 // New constructs and initializes an embedded runtime.
@@ -143,7 +167,10 @@ func New(ctx context.Context, cfg Config) (*Runtime, error) {
 		}
 		api = api.WithOAuthApps(apps)
 	}
-	return &Runtime{store: st, engine: engine, handler: api.Handler()}, nil
+	return &Runtime{
+		store: st, registry: reg, secrets: cfg.Secrets, site: cfg.Site, logger: cfg.Logger,
+		engine: engine, handler: api.Handler(),
+	}, nil
 }
 
 // Handler returns the module's versioned HTTP API. A host commonly mounts it
@@ -156,6 +183,118 @@ func (r *Runtime) Start(ctx context.Context) { r.engine.Run(ctx) }
 
 // Close releases module persistence resources.
 func (r *Runtime) Close() error { return r.store.Close() }
+
+// ImportConnection securely imports an existing host credential. The secret
+// is validated through provider discovery before its opaque reference is
+// persisted. If PropertyReference is empty, the connection remains disabled
+// until an administrator selects one from Properties in the Console.
+//
+// ImportConnection never replaces an existing credential. Hosts may safely
+// call it during startup migration; subsequent calls are no-ops.
+func (r *Runtime) ImportConnection(ctx context.Context, req ImportConnectionRequest) (ImportConnectionResult, error) {
+	providerName := strings.TrimSpace(req.Provider)
+	credentialType := strings.TrimSpace(req.Credential.Type)
+	if providerName == "" {
+		return ImportConnectionResult{}, errors.New("provider is required")
+	}
+	provider, ok := r.registry.Get(providerName)
+	if !ok {
+		return ImportConnectionResult{}, fmt.Errorf("provider %q is not installed", providerName)
+	}
+	if credentialType == "" || len(req.Credential.Bytes) == 0 {
+		return ImportConnectionResult{}, errors.New("credential type and material are required")
+	}
+	if !descriptorAcceptsCredential(provider.Descriptor(), credentialType) {
+		return ImportConnectionResult{}, fmt.Errorf("provider %q does not accept credential type %q", providerName, credentialType)
+	}
+
+	current, err := r.store.GetConnection(ctx, r.site.ID, providerName)
+	if err != nil {
+		return ImportConnectionResult{}, fmt.Errorf("get provider connection: %w", err)
+	}
+	if current.CredentialRef.ID != "" {
+		return ImportConnectionResult{Connection: current}, nil
+	}
+
+	scope := core.Scope{SiteID: r.site.ID, Provider: providerName}
+	ref, err := r.secrets.Put(ctx, scope, core.SecretMaterial{
+		Type: credentialType, Bytes: append([]byte(nil), req.Credential.Bytes...),
+	})
+	if err != nil {
+		return ImportConnectionResult{}, fmt.Errorf("store imported credential: %w", err)
+	}
+	keepSecret := false
+	defer func() {
+		if !keepSecret {
+			_ = r.secrets.Revoke(context.WithoutCancel(ctx), scope, ref)
+		}
+	}()
+
+	handle, err := r.secrets.Open(ctx, scope, ref, core.PurposeTest)
+	if err != nil {
+		return ImportConnectionResult{}, errors.New("open imported credential")
+	}
+	properties, discoverErr := provider.DiscoverProperties(ctx, handle)
+	handle.Close()
+	if discoverErr != nil {
+		return ImportConnectionResult{}, fmt.Errorf("discover provider properties: %w", discoverErr)
+	}
+
+	propertyReference := strings.TrimSpace(req.PropertyReference)
+	if propertyReference != "" {
+		handle, err = r.secrets.Open(ctx, scope, ref, core.PurposeTest)
+		if err != nil {
+			return ImportConnectionResult{}, errors.New("open imported credential")
+		}
+		testErr := provider.Test(ctx, r.site, core.Property{Reference: propertyReference}, handle)
+		handle.Close()
+		if testErr != nil {
+			return ImportConnectionResult{}, fmt.Errorf("test provider property: %w", testErr)
+		}
+	}
+
+	swapped, err := r.store.ConfigureConnectionCAS(
+		ctx, r.site.ID, providerName, current.CredentialRef, ref,
+		propertyReference, propertyReference != "",
+	)
+	if err != nil {
+		return ImportConnectionResult{}, fmt.Errorf("configure imported connection: %w", err)
+	}
+	if !swapped {
+		latest, latestErr := r.store.GetConnection(ctx, r.site.ID, providerName)
+		if latestErr != nil {
+			return ImportConnectionResult{}, errors.New("provider connection changed during import")
+		}
+		return ImportConnectionResult{Connection: latest}, nil
+	}
+	keepSecret = true
+
+	actor := strings.TrimSpace(req.Actor)
+	if actor == "" {
+		actor = "host-import"
+	}
+	if err := r.store.AppendAudit(context.WithoutCancel(ctx), core.AuditEvent{
+		Actor: actor, Action: "connection.credential.import", Target: providerName, Result: "ok",
+	}); err != nil {
+		// Import success must not be rolled back because an append-only audit
+		// write failed. The host will still receive the operational error in logs.
+		r.logger.Error("append imported connection audit", "provider", providerName, "error", err)
+	}
+	connection, err := r.store.GetConnection(ctx, r.site.ID, providerName)
+	if err != nil {
+		return ImportConnectionResult{}, fmt.Errorf("read imported connection: %w", err)
+	}
+	return ImportConnectionResult{Imported: true, Connection: connection, Properties: properties}, nil
+}
+
+func descriptorAcceptsCredential(descriptor core.Descriptor, credentialType string) bool {
+	for _, accepted := range descriptor.CredentialTypes {
+		if accepted == credentialType {
+			return true
+		}
+	}
+	return false
+}
 
 func validateConfig(cfg Config) error {
 	if strings.TrimSpace(cfg.Site.ID) == "" {
