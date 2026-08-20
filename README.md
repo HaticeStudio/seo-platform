@@ -48,6 +48,25 @@ router.Handle("/admin/seo/", http.StripPrefix("/admin/seo", seo.Handler()))
 <SeoConsole apiBaseUrl="/admin/seo" locale="zh-TW" />
 ```
 
+Hosts upgrading from an existing integration can import a credential directly
+from their server process. This path is create-only, stores the material in the
+configured `SecretStore`, discovers visible properties, and never sends the
+credential through a browser:
+
+```go
+result, err := seo.ImportConnection(ctx, platform.ImportConnectionRequest{
+    Provider: "google-search-console",
+    Credential: core.SecretMaterial{
+        Type: "service_account_json",
+        Bytes: existingServerCredential,
+    },
+    PropertyReference: "https://www.example.com/", // optional
+    Actor: "host-migration",
+})
+// With no PropertyReference, result.Properties is rendered for selection in
+// the embedded Console. Repeated imports never overwrite an existing setup.
+```
+
 The host may implement `core.SecretStore` with its existing KMS/Vault/encrypted
 database. `secretstore.NewEncryptedFiles` is included for single-machine hosts.
 

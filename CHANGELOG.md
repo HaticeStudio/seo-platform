@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.3.1 — 2026-08-21
+
+- Added the public, create-only `Runtime.ImportConnection` API so embedding
+  hosts can move existing provider credentials into the configured SecretStore
+  without a browser or a second platform service.
+- Existing configured connections are never overwritten by host startup
+  reconciliation; imports validate provider access and return discovered
+  properties for final selection in the Console.
+
+Migration notes: no database or HTTP migration. The Go API addition is
+backward-compatible. Rollback to v0.3.0 keeps already imported connections and
+encrypted credentials usable.
+
 ## v0.3.0 — 2026-08-19
 
 - Corrected the integration model from standalone-first to embed-first.
