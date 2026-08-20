@@ -62,6 +62,9 @@ result, err := seo.ImportConnection(ctx, platform.ImportConnectionRequest{
     },
     PropertyReference: "https://www.example.com/", // optional
     Actor: "host-migration",
+    // Optional: keep a disabled, encrypted connection when provider access
+    // still needs to be granted, so the Console can retry property discovery.
+    RetainOnDiscoveryFailure: true,
 })
 // With no PropertyReference, result.Properties is rendered for selection in
 // the embedded Console. Repeated imports never overwrite an existing setup.

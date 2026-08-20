@@ -37,6 +37,7 @@ export type DiscoveredProperty = {
 
 export type ConnectionState =
   | 'not_configured'
+  | 'needs_property'
   | 'reauthorization_required'
   | 'error'
   | 'stale'

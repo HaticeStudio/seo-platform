@@ -246,13 +246,15 @@ func connectionToJSON(c core.ProviderConnection) connectionJSON {
 // the UI never guesses from empty arrays (ADR 0005 failure modes).
 func connectionState(c core.ProviderConnection) string {
 	switch {
-	case !c.Enabled || c.CredentialRef.ID == "":
+	case c.CredentialRef.ID == "":
 		return "not_configured"
 	case c.LastErrorCode != core.ErrNone:
 		if c.LastErrorCode == core.ErrUnauthorized {
 			return "reauthorization_required"
 		}
 		return "error"
+	case !c.Enabled || c.PropertyReference == "":
+		return "needs_property"
 	case c.DataThroughDate != nil && time.Since(*c.DataThroughDate) > 5*24*time.Hour:
 		return "stale"
 	case c.LastSuccessAt == nil:

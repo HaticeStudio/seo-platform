@@ -64,15 +64,23 @@ type ImportConnectionRequest struct {
 	Credential        core.SecretMaterial
 	PropertyReference string
 	Actor             string
+	// RetainOnDiscoveryFailure lets a trusted embedding host stage an existing
+	// credential when provider access has not been granted yet. The connection
+	// remains disabled and the Console can retry discovery after an
+	// administrator fixes provider-side permissions. Browser credential entry
+	// remains on the stricter HTTP path and does not use this option.
+	RetainOnDiscoveryFailure bool
 }
 
 // ImportConnectionResult reports whether this call imported the credential.
 // Properties contains the provider-side choices visible to that credential so
 // the host can leave final property selection to the embedded Console.
 type ImportConnectionResult struct {
-	Imported   bool
-	Connection core.ProviderConnection
-	Properties []core.Property
+	Imported              bool
+	Connection            core.ProviderConnection
+	Properties            []core.Property
+	DiscoveryErrorCode    core.ErrorCode
+	DiscoveryErrorMessage string
 }
 
 // Config wires one embedded runtime into a host application.
@@ -237,7 +245,9 @@ func (r *Runtime) ImportConnection(ctx context.Context, req ImportConnectionRequ
 	properties, discoverErr := provider.DiscoverProperties(ctx, handle)
 	handle.Close()
 	if discoverErr != nil {
-		return ImportConnectionResult{}, fmt.Errorf("discover provider properties: %w", discoverErr)
+		if !req.RetainOnDiscoveryFailure || strings.TrimSpace(req.PropertyReference) != "" {
+			return ImportConnectionResult{}, fmt.Errorf("discover provider properties: %w", discoverErr)
+		}
 	}
 
 	propertyReference := strings.TrimSpace(req.PropertyReference)
@@ -284,7 +294,19 @@ func (r *Runtime) ImportConnection(ctx context.Context, req ImportConnectionRequ
 	if err != nil {
 		return ImportConnectionResult{}, fmt.Errorf("read imported connection: %w", err)
 	}
-	return ImportConnectionResult{Imported: true, Connection: connection, Properties: properties}, nil
+	result := ImportConnectionResult{Imported: true, Connection: connection, Properties: properties}
+	if discoverErr != nil {
+		result.DiscoveryErrorCode, result.DiscoveryErrorMessage = safeProviderError(discoverErr)
+	}
+	return result, nil
+}
+
+func safeProviderError(err error) (core.ErrorCode, string) {
+	var providerErr *core.SyncError
+	if errors.As(err, &providerErr) {
+		return providerErr.Code, providerErr.Message
+	}
+	return core.ErrInternal, "provider property discovery failed"
 }
 
 func descriptorAcceptsCredential(descriptor core.Descriptor, credentialType string) bool {

@@ -183,3 +183,54 @@ func TestRuntimeImportCanLeavePropertySelectionToConsole(t *testing.T) {
 		t.Fatalf("properties = %+v", result.Properties)
 	}
 }
+
+func TestRuntimeCanStageHostCredentialUntilProviderPermissionIsGranted(t *testing.T) {
+	provider := providertest.NewFake("fake-search")
+	provider.DiscoverFunc = func(context.Context, core.CredentialHandle) ([]core.Property, error) {
+		return nil, &core.SyncError{Code: core.ErrUnauthorized, Message: "grant property viewer access"}
+	}
+	runtime, err := platform.New(context.Background(), platform.Config{
+		Site:      core.Site{ID: "host-site", PublicURL: "https://example.test", SitemapURL: "https://example.test/sitemap.xml"},
+		StorePath: filepath.Join(t.TempDir(), "seo.db"),
+		Secrets:   secrets.NewMemory(),
+		Authenticator: platform.AuthenticateFunc(func(*http.Request) (core.Subject, error) {
+			return core.Subject{ID: "host-admin", Scopes: []string{core.ScopeRead}}, nil
+		}),
+		Providers: []core.Provider{provider},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = runtime.Close() })
+
+	if _, err := runtime.ImportConnection(context.Background(), platform.ImportConnectionRequest{
+		Provider:   "fake-search",
+		Credential: core.SecretMaterial{Type: "api_key", Bytes: []byte("strict-import-secret")},
+	}); err == nil {
+		t.Fatal("default import must remain strict when discovery fails")
+	}
+
+	result, err := runtime.ImportConnection(context.Background(), platform.ImportConnectionRequest{
+		Provider:   "fake-search",
+		Credential: core.SecretMaterial{Type: "api_key", Bytes: []byte("existing-host-secret")},
+		Actor:      "host-migration", RetainOnDiscoveryFailure: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Imported || result.Connection.CredentialRef.ID == "" || result.Connection.Enabled {
+		t.Fatalf("staged import = %+v", result)
+	}
+	if result.DiscoveryErrorCode != core.ErrUnauthorized || result.DiscoveryErrorMessage != "grant property viewer access" {
+		t.Fatalf("discovery error = %s %q", result.DiscoveryErrorCode, result.DiscoveryErrorMessage)
+	}
+
+	second, err := runtime.ImportConnection(context.Background(), platform.ImportConnectionRequest{
+		Provider:                 "fake-search",
+		Credential:               core.SecretMaterial{Type: "api_key", Bytes: []byte("must-not-replace")},
+		RetainOnDiscoveryFailure: true,
+	})
+	if err != nil || second.Imported || second.Connection.CredentialRef != result.Connection.CredentialRef {
+		t.Fatalf("idempotent staged import = %+v, err = %v", second, err)
+	}
+}
