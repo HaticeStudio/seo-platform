@@ -30,6 +30,16 @@ func TestConversionCapabilityRequiresConfiguredEvents(t *testing.T) {
 	}
 }
 
+func TestDescriptorStartsWithWebsitePropertyGuidance(t *testing.T) {
+	links := New().Descriptor().SetupLinks
+	if len(links) == 0 || links[0].Kind != "web_property" {
+		t.Fatalf("first setup link = %#v, want website property guidance", links)
+	}
+	if !strings.Contains(links[0].Description, "Web data stream") || !strings.Contains(links[0].Description, "Android") {
+		t.Fatalf("website property guidance is ambiguous: %q", links[0].Description)
+	}
+}
+
 type memHandle struct{}
 
 func (memHandle) Material() core.SecretMaterial {

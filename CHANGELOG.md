@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.3.4 — 2026-08-21
+
+- Changed the first GA4 setup step to explicitly create or select a dedicated
+  website property and add a Web data stream.
+- Added a visible warning not to reuse a Firebase or Android app property for
+  website reporting.
+
+Migration notes: no database or HTTP migration.
+
 ## v0.3.3 — 2026-08-21
 
 - Added a staged host-import mode that keeps an existing credential encrypted

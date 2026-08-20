@@ -99,7 +99,7 @@ func (p *Provider) Descriptor() core.Descriptor {
 		SetupURL:        "https://analytics.google.com/analytics/web/",
 		DocsURL:         "https://developers.google.com/analytics/devguides/reporting/data/v1",
 		SetupLinks: []core.SetupLink{
-			{Kind: "console", Label: "Google Analytics", URL: "https://analytics.google.com/analytics/web/", Description: "Open reports for the selected property."},
+			{Kind: "web_property", Label: "Create a website GA4 property", URL: "https://support.google.com/analytics/answer/9304153", Description: "Create or select a dedicated website property and add a Web data stream; do not use a Firebase or Android app property."},
 			{Kind: "permissions", Label: "Google Analytics Admin", URL: "https://analytics.google.com/analytics/web/#/a/admin", Description: "Grant the OAuth user or service account read access."},
 			{Kind: "credentials", Label: "Google Cloud credentials", URL: "https://console.cloud.google.com/apis/credentials", Description: "Create the OAuth web client used by this deployment."},
 		},
