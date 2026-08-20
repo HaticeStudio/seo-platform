@@ -1,5 +1,18 @@
 # Changelog
 
+## v0.3.3 — 2026-08-21
+
+- Added a staged host-import mode that keeps an existing credential encrypted
+  when provider-side property permission has not been granted yet. The
+  connection remains disabled and can retry discovery from the Console.
+- Added a distinct "Choose a property" connection state and a clear continue
+  setup path for staged credentials.
+- Corrected credential guidance so Google service-account setup never displays
+  Bing Webmaster API-key instructions.
+
+Migration notes: no database migration. Embedding hosts opt into staged import
+with `RetainOnDiscoveryFailure`; browser credential entry remains strict.
+
 ## v0.3.2 — 2026-08-21
 
 - Added GA4 property discovery through the Google Analytics Admin API for both

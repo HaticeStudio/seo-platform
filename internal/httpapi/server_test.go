@@ -229,6 +229,17 @@ func TestConnectionStateRequiresReauthorizationForUnauthorizedCredential(t *test
 	}
 }
 
+func TestConnectionStateDistinguishesStagedCredentialFromMissingSetup(t *testing.T) {
+	if state := connectionState(core.ProviderConnection{}); state != "not_configured" {
+		t.Fatalf("empty connection state = %q", state)
+	}
+	if state := connectionState(core.ProviderConnection{
+		CredentialRef: core.CredentialRef{ID: "opaque", Type: "service_account_json"},
+	}); state != "needs_property" {
+		t.Fatalf("staged connection state = %q, want needs_property", state)
+	}
+}
+
 func TestSiteEndpointExposesOnlyNonSecretSetupValues(t *testing.T) {
 	server, _, _, _ := newTestServer(t, core.Subject{ID: "u", Scopes: []string{core.ScopeRead}})
 	server.WithPlatformURL("https://seo.example.test")

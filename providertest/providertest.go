@@ -50,10 +50,11 @@ func RunContract(t *testing.T, p core.Provider) {
 // Fake is an in-memory provider for tests. Behavior is injected per method;
 // unset hooks succeed with zero values.
 type Fake struct {
-	Desc       core.Descriptor
-	SyncFunc   func(ctx context.Context, req core.SyncRequest, credential core.CredentialHandle, sink core.SnapshotSink) (core.SyncResult, error)
-	TestFunc   func(ctx context.Context) error
-	RevokeFunc func(ctx context.Context) error
+	Desc         core.Descriptor
+	DiscoverFunc func(ctx context.Context, credential core.CredentialHandle) ([]core.Property, error)
+	SyncFunc     func(ctx context.Context, req core.SyncRequest, credential core.CredentialHandle, sink core.SnapshotSink) (core.SyncResult, error)
+	TestFunc     func(ctx context.Context) error
+	RevokeFunc   func(ctx context.Context) error
 
 	mu        sync.Mutex
 	SyncCalls []core.SyncRequest
@@ -77,7 +78,10 @@ func NewFake(name string) *Fake {
 
 func (f *Fake) Descriptor() core.Descriptor { return f.Desc }
 
-func (f *Fake) DiscoverProperties(context.Context, core.CredentialHandle) ([]core.Property, error) {
+func (f *Fake) DiscoverProperties(ctx context.Context, credential core.CredentialHandle) ([]core.Property, error) {
+	if f.DiscoverFunc != nil {
+		return f.DiscoverFunc(ctx, credential)
+	}
 	return []core.Property{{Reference: "fake-property", DisplayName: "Fake property"}}, nil
 }
 

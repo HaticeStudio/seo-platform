@@ -159,6 +159,39 @@ describe('SeoConsole', () => {
 		expect(sessionStorage.length).toBe(0)
 	})
 
+	it('keeps a staged GA4 credential actionable without showing Bing instructions', async () => {
+		const originalProviders = responses['/api/v0/providers']
+		const originalConnections = responses['/api/v0/connections']
+		responses['/api/v0/providers'] = {
+			providers: [{
+				name: 'google-analytics',
+				display_name: 'Google Analytics 4',
+				credential_types: ['oauth2', 'service_account_json'],
+				capabilities: [{ capability: 'analytics.acquisition', supports_cursor: false }],
+				setup_url: 'https://analytics.google.com/analytics/web/',
+				setup_links: [{ kind: 'permissions', label: 'Google Analytics Admin', url: 'https://analytics.google.com/analytics/web/#/a/admin' }],
+				oauth_available: false,
+			}],
+		}
+		responses['/api/v0/connections'] = {
+			connections: [{ provider: 'google-analytics', configured: true, enabled: false, state: 'needs_property' }],
+		}
+
+		try {
+			render(<SeoConsole apiBaseUrl="https://console.example" locale="zh-TW" />)
+			expect(await screen.findByText('Google Analytics 4')).toBeTruthy()
+			expect(screen.getByText('等待選擇 Property')).toBeTruthy()
+			expect(screen.getByText(/既有憑證已在後端加密保存/)).toBeTruthy()
+			fireEvent.click(screen.getByRole('button', { name: '繼續設定' }))
+			expect(screen.getByRole('button', { name: '重新取得 Property' })).toBeTruthy()
+			expect(screen.getByText(/無法使用 OAuth/)).toBeTruthy()
+			expect(screen.queryByText(/Bing Webmaster/)).toBeNull()
+		} finally {
+			responses['/api/v0/providers'] = originalProviders
+			responses['/api/v0/connections'] = originalConnections
+		}
+	})
+
 	it('completes OAuth once and restores the server-bound local return path', async () => {
 		window.history.replaceState({}, '', '/oauth/callback?state=state-1&code=temporary-code')
 		sessionStorage.setItem(OAUTH_PROVIDER_KEY, 'google-search-console')

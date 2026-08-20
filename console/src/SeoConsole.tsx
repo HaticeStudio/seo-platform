@@ -29,12 +29,12 @@ const COPY = {
   en: {
     setupValues: 'Setup values', providers: 'Providers', syncRuns: 'Sync runs', reports: 'Reports',
     publicURL: 'Public site URL', sitemapURL: 'Sitemap URL', callbackURL: 'OAuth callback URL', copy: 'Copy', copied: 'Copied',
-    states: { not_configured: 'Not configured', reauthorization_required: 'Reauthorization required', error: 'Error', stale: 'Stale', no_data: 'No data yet', connected: 'Connected', authorizing: 'Authorizing', syncing: 'Syncing' } as Record<DisplayState, string>,
-    connect: 'Connect', reconfigure: 'Reconfigure', test: 'Test connection', revoke: 'Disconnect', authorize: 'Authorize with Google',
+    states: { not_configured: 'Not configured', needs_property: 'Choose a property', reauthorization_required: 'Reauthorization required', error: 'Error', stale: 'Stale', no_data: 'No data yet', connected: 'Connected', authorizing: 'Authorizing', syncing: 'Syncing' } as Record<DisplayState, string>,
+    connect: 'Connect', continueSetup: 'Continue setup', reconfigure: 'Reconfigure', test: 'Test connection', revoke: 'Disconnect', authorize: 'Authorize with Google',
     credentialType: 'Credential type', credential: 'Credential', saveCredential: 'Save credential securely', property: 'Property', chooseProperty: 'Choose a property', useProperty: 'Test and use this property', refreshProperties: 'Refresh properties', cancel: 'Close setup',
     setupGuide: 'Setup guide', officialSteps: 'Open the official consoles below and complete the required steps.', secretNotice: 'Credentials are sent once to the server-side encrypted secret store. They are never returned by the API or saved in browser storage.',
     oauthPreferred: 'Recommended: authorize with Google OAuth. A service-account JSON remains available for unattended installations.',
-    apiKeyHelp: 'Create a Bing Webmaster API key, then paste it here.', connectedHelp: 'Credential and property are configured. Test the connection, then start the first sync.',
+    apiKeyHelp: 'Create a Bing Webmaster API key, then paste it here.', serviceAccountHelp: 'Use a Google service-account JSON only when OAuth is unavailable or for an unattended installation.', existingCredentialHelp: 'An existing credential is already encrypted on the server. Grant it provider access, then refresh the property list; you do not need to paste it again.', connectedHelp: 'Credential and property are configured. Test the connection, then start the first sync.',
     selectPropertyHelp: 'Select a property visible to this credential. Property selection also performs a live permission test.',
     testPassed: 'Connection test passed.', openingProvider: 'Opening provider authorization…', disconnected: 'Provider disconnected.',
     noProviders: 'No providers are installed.', noRuns: 'No sync runs yet.', noData: 'No report data yet. Connect a provider and run a sync.',
@@ -45,12 +45,12 @@ const COPY = {
   zh: {
     setupValues: '本網站設定值', providers: '資料來源設定', syncRuns: '同步紀錄', reports: '資料預覽',
     publicURL: '公開網站網址', sitemapURL: 'Sitemap 網址', callbackURL: 'OAuth 回呼網址', copy: '複製', copied: '已複製',
-    states: { not_configured: '尚未設定', reauthorization_required: '需要重新授權', error: '連線錯誤', stale: '資料過期', no_data: '尚無資料', connected: '已連線', authorizing: '授權中', syncing: '同步中' } as Record<DisplayState, string>,
-    connect: '開始設定', reconfigure: '調整設定', test: '測試連線', revoke: '中斷連線', authorize: '使用 Google 帳號授權',
+    states: { not_configured: '尚未設定', needs_property: '等待選擇 Property', reauthorization_required: '需要重新授權', error: '連線錯誤', stale: '資料過期', no_data: '尚無資料', connected: '已連線', authorizing: '授權中', syncing: '同步中' } as Record<DisplayState, string>,
+    connect: '開始設定', continueSetup: '繼續設定', reconfigure: '調整設定', test: '測試連線', revoke: '中斷連線', authorize: '使用 Google 帳號授權',
     credentialType: '憑證類型', credential: '憑證', saveCredential: '安全儲存憑證', property: 'Property', chooseProperty: '選擇網站／Property', useProperty: '測試並使用這個 Property', refreshProperties: '重新取得 Property', cancel: '關閉設定',
     setupGuide: '設定引導', officialSteps: '依序開啟下列官方頁面完成設定，完成後回到這裡授權或輸入憑證。', secretNotice: '憑證只會送往後端加密 SecretStore；API 不會回傳，也不會保存在瀏覽器儲存空間。',
     oauthPreferred: '建議使用 Google OAuth 授權；只有無人值守環境才需要匯入 service-account JSON。',
-    apiKeyHelp: '先到 Bing Webmaster 建立 API Key，再貼到這裡。', connectedHelp: '憑證與 Property 已設定。請測試連線，再執行第一次同步。',
+    apiKeyHelp: '先到 Bing Webmaster 建立 API Key，再貼到這裡。', serviceAccountHelp: '只有無法使用 OAuth 或無人值守的環境才需要匯入 Google service-account JSON。', existingCredentialHelp: '既有憑證已在後端加密保存；授予資料來源權限後重新取得 Property 即可，不需要再次貼上憑證。', connectedHelp: '憑證與 Property 已設定。請測試連線，再執行第一次同步。',
     selectPropertyHelp: '請選擇這組憑證能存取的 Property；儲存時會同步驗證權限。',
     testPassed: '連線測試成功。', openingProvider: '正在前往官方授權頁面…', disconnected: '已中斷資料來源連線。',
     noProviders: '沒有可用的資料來源。', noRuns: '尚無同步紀錄。', noData: '尚無資料；請先完成連線並執行同步。',
@@ -72,7 +72,7 @@ function setupLinkLabel(kind: string | undefined, fallback: string, text: Consol
     console: '開啟官方管理平台',
     enable_api: '啟用必要 API',
     credentials: '建立／管理憑證',
-    permissions: '設定網站與帳號權限',
+    permissions: '設定資源與帳號權限',
     sitemaps: '提交 Sitemap',
   } as Record<string, string>)[kind ?? ''] ?? fallback
 }
@@ -80,7 +80,7 @@ function setupLinkLabel(kind: string | undefined, fallback: string, text: Consol
 function setupLinkDescription(kind: string | undefined, fallback: string | undefined, text: ConsoleCopy): string | undefined {
   if (text !== COPY.zh) return fallback
   return ({
-    console: '開啟官方平台，確認網站與資料狀態。',
+    console: '開啟官方平台，確認資源與資料狀態。',
     enable_api: '在持有 OAuth 用戶端的 Google Cloud 專案啟用必要 API。',
     credentials: '建立或管理 OAuth 用戶端、service account 或 API Key。',
     permissions: '授予登入帳號或 service account 讀取 Property 的權限。',
@@ -90,6 +90,7 @@ function setupLinkDescription(kind: string | undefined, fallback: string | undef
 
 function connectionDiagnostic(connection: Connection | undefined, text: ConsoleCopy): string {
   if (!connection || connection.state === 'not_configured') return ''
+  if (connection.state === 'needs_property') return text.existingCredentialHelp
   if (connection.state === 'reauthorization_required') {
     return text === COPY.zh ? '授權已失效或帳號沒有 Property 權限，請重新授權並再次選擇 Property。' : 'Authorization expired or lost property access. Reauthorize and choose the property again.'
   }
@@ -400,12 +401,14 @@ function ProviderCard({
       <footer>
         {!connecting && (
           <button onClick={() => setConnecting(true)}>
-            {state === 'not_configured' ? text.connect : text.reconfigure}
+            {state === 'not_configured' ? text.connect : state === 'needs_property' ? text.continueSetup : text.reconfigure}
           </button>
         )}
-        {state !== 'not_configured' && (
+        {connection?.enabled && (
+          <button onClick={() => void test()}>{text.test}</button>
+        )}
+        {connection?.configured && (
           <>
-            <button onClick={() => void test()}>{text.test}</button>
             <button className="seo-console__danger" onClick={() => void revoke()}>
               {text.revoke}
             </button>
@@ -414,7 +417,7 @@ function ProviderCard({
         {provider.capabilities.map((capability) => (
           <button
             key={capability.capability}
-            disabled={busy || state === 'not_configured'}
+            disabled={busy || !connection?.enabled}
             onClick={() => onSync(provider.name, capability.capability)}
           >
             {text.sync} {capability.capability}
@@ -509,9 +512,30 @@ function ConnectPanel({
           <button onClick={() => void onOAuth()}>{text.authorize}</button>
         </>
       )}
+      {allowManualProperty && (
+        <div className="seo-console__property-actions">
+          <p className="seo-console__hint">{text.existingCredentialHelp}</p>
+          <button type="button" onClick={() => void onDiscoverProperties()}>{text.refreshProperties}</button>
+          <label>
+            {text.property}
+            <input
+              value={property}
+              onChange={(event) => setProperty(event.target.value)}
+              placeholder="Property ID or site URL"
+            />
+          </label>
+          <button disabled={!property.trim()} onClick={() => void onProperty(property.trim())}>
+            {text.useProperty}
+          </button>
+        </div>
+      )}
       {manualTypes.length > 0 && (
         <>
-          {!oauthAvailable && <p className="seo-console__hint">{text.apiKeyHelp}</p>}
+          {!oauthAvailable && (
+            <p className="seo-console__hint">
+              {credentialType === 'api_key' ? text.apiKeyHelp : text.serviceAccountHelp}
+            </p>
+          )}
           {manualTypes.length > 1 && (
             <label>
               {text.credentialType}
@@ -554,22 +578,6 @@ function ConnectPanel({
           </button>
           <p className="seo-console__hint">{text.secretNotice}</p>
         </>
-      )}
-      {allowManualProperty && (
-        <div className="seo-console__property-actions">
-          <button type="button" onClick={() => void onDiscoverProperties()}>{text.refreshProperties}</button>
-          <label>
-            {text.property}
-            <input
-              value={property}
-              onChange={(event) => setProperty(event.target.value)}
-              placeholder="Property ID or site URL"
-            />
-          </label>
-          <button disabled={!property.trim()} onClick={() => void onProperty(property.trim())}>
-            {text.useProperty}
-          </button>
-        </div>
       )}
       <button className="seo-console__ghost" onClick={onClose}>
         {text.cancel}
