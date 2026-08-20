@@ -1,5 +1,17 @@
 # Changelog
 
+## v0.3.2 — 2026-08-21
+
+- Added GA4 property discovery through the Google Analytics Admin API for both
+  OAuth and service-account credentials.
+- The Console and embedding-host import flow can now present every accessible
+  GA4 property by property and account name instead of requiring an
+  administrator to find and enter a numeric property ID manually.
+
+Migration notes: no database or HTTP migration. Existing GA4 connections are
+unchanged; unconfigured connections can discover and select a property after
+upgrading.
+
 ## v0.3.1 — 2026-08-21
 
 - Added the public, create-only `Runtime.ImportConnection` API so embedding

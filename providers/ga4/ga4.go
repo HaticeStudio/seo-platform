@@ -14,6 +14,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +22,7 @@ import (
 	"github.com/HaticeStudio/seo-platform/core"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
+	analyticsadmin "google.golang.org/api/analyticsadmin/v1beta"
 	analyticsdata "google.golang.org/api/analyticsdata/v1beta"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/api/option"
@@ -45,6 +47,7 @@ type Provider struct {
 }
 
 type service interface {
+	ListProperties(ctx context.Context) ([]core.Property, error)
 	RunReport(ctx context.Context, property string, request *analyticsdata.RunReportRequest) (*analyticsdata.RunReportResponse, error)
 }
 
@@ -104,13 +107,15 @@ func (p *Provider) Descriptor() core.Descriptor {
 }
 
 func (p *Provider) DiscoverProperties(ctx context.Context, credential core.CredentialHandle) ([]core.Property, error) {
-	// The Data API cannot enumerate properties; that needs the Admin API,
-	// which arrives with the interactive OAuth flow. Administrators enter the
-	// numeric property ID meanwhile.
-	if _, err := p.newService(ctx, credential); err != nil {
+	svc, err := p.newService(ctx, credential)
+	if err != nil {
 		return nil, err
 	}
-	return nil, &core.SyncError{Code: core.ErrUnsupported, Message: "GA4 property discovery is not available; enter the numeric property ID"}
+	properties, err := svc.ListProperties(ctx)
+	if err != nil {
+		return nil, classify(err)
+	}
+	return properties, nil
 }
 
 func (p *Provider) Test(ctx context.Context, _ core.Site, property core.Property, credential core.CredentialHandle) error {
@@ -434,7 +439,8 @@ func classify(err error) error {
 }
 
 type googleService struct {
-	svc *analyticsdata.Service
+	data  *analyticsdata.Service
+	admin *analyticsadmin.Service
 }
 
 func newGoogleService(ctx context.Context, credential core.CredentialHandle) (service, error) {
@@ -461,13 +467,50 @@ func newGoogleService(ctx context.Context, credential core.CredentialHandle) (se
 	default:
 		return nil, &core.SyncError{Code: core.ErrUnauthorized, Message: "an OAuth or service-account credential is required"}
 	}
-	svc, err := analyticsdata.NewService(ctx, clientOption, option.WithScopes(analyticsdata.AnalyticsReadonlyScope))
+	dataService, err := analyticsdata.NewService(ctx, clientOption, option.WithScopes(analyticsdata.AnalyticsReadonlyScope))
 	if err != nil {
 		return nil, &core.SyncError{Code: core.ErrInternal, Message: "initialize Google Analytics client"}
 	}
-	return googleService{svc: svc}, nil
+	adminService, err := analyticsadmin.NewService(ctx, clientOption, option.WithScopes(analyticsdata.AnalyticsReadonlyScope))
+	if err != nil {
+		return nil, &core.SyncError{Code: core.ErrInternal, Message: "initialize Google Analytics Admin client"}
+	}
+	return googleService{data: dataService, admin: adminService}, nil
 }
 
 func (g googleService) RunReport(ctx context.Context, property string, request *analyticsdata.RunReportRequest) (*analyticsdata.RunReportResponse, error) {
-	return g.svc.Properties.RunReport(property, request).Context(ctx).Do()
+	return g.data.Properties.RunReport(property, request).Context(ctx).Do()
+}
+
+func (g googleService) ListProperties(ctx context.Context) ([]core.Property, error) {
+	properties := make([]core.Property, 0)
+	err := g.admin.AccountSummaries.List().PageSize(200).Pages(ctx, func(response *analyticsadmin.GoogleAnalyticsAdminV1betaListAccountSummariesResponse) error {
+		for _, account := range response.AccountSummaries {
+			for _, property := range account.PropertySummaries {
+				reference := strings.TrimPrefix(strings.TrimSpace(property.Property), "properties/")
+				if reference == "" {
+					continue
+				}
+				displayName := strings.TrimSpace(property.DisplayName)
+				if displayName == "" {
+					displayName = property.Property
+				}
+				if accountName := strings.TrimSpace(account.DisplayName); accountName != "" {
+					displayName += " — " + accountName
+				}
+				properties = append(properties, core.Property{Reference: reference, DisplayName: displayName})
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(properties, func(i, j int) bool {
+		if properties[i].DisplayName == properties[j].DisplayName {
+			return properties[i].Reference < properties[j].Reference
+		}
+		return properties[i].DisplayName < properties[j].DisplayName
+	})
+	return properties, nil
 }

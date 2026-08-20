@@ -11,7 +11,9 @@ import (
 	"github.com/HaticeStudio/seo-platform/core"
 	"github.com/HaticeStudio/seo-platform/providertest"
 	"golang.org/x/oauth2"
+	analyticsadmin "google.golang.org/api/analyticsadmin/v1beta"
 	analyticsdata "google.golang.org/api/analyticsdata/v1beta"
+	"google.golang.org/api/option"
 )
 
 func TestContract(t *testing.T) {
@@ -53,8 +55,14 @@ func (s *memSink) Write(_ context.Context, dataset string, rows []map[string]any
 func (s *memSink) Checkpoint(context.Context, string) error { return nil }
 
 type fakeService struct {
-	responses []*analyticsdata.RunReportResponse
-	requests  []*analyticsdata.RunReportRequest
+	properties []core.Property
+	listErr    error
+	responses  []*analyticsdata.RunReportResponse
+	requests   []*analyticsdata.RunReportRequest
+}
+
+func (f *fakeService) ListProperties(context.Context) ([]core.Property, error) {
+	return f.properties, f.listErr
 }
 
 func (f *fakeService) RunReport(_ context.Context, _ string, request *analyticsdata.RunReportRequest) (*analyticsdata.RunReportResponse, error) {
@@ -71,6 +79,48 @@ func (f *fakeService) RunReport(_ context.Context, _ string, request *analyticsd
 func withFake(p *Provider, fake *fakeService) *Provider {
 	p.newService = func(context.Context, core.CredentialHandle) (service, error) { return fake, nil }
 	return p
+}
+
+func TestDiscoverProperties(t *testing.T) {
+	want := []core.Property{
+		{Reference: "123", DisplayName: "Website — Company"},
+		{Reference: "456", DisplayName: "App — Company"},
+	}
+	properties, err := withFake(New(), &fakeService{properties: want}).DiscoverProperties(context.Background(), memHandle{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(properties) != len(want) || properties[0] != want[0] || properties[1] != want[1] {
+		t.Fatalf("properties = %+v, want %+v", properties, want)
+	}
+}
+
+func TestGoogleServiceListsAllAccountProperties(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("pageToken") == "next" {
+			_, _ = w.Write([]byte(`{"accountSummaries":[{"displayName":"Company","propertySummaries":[{"property":"properties/123","displayName":"Website"},{"property":"","displayName":"ignored"}]}]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"accountSummaries":[{"displayName":"Personal","propertySummaries":[{"property":"properties/456","displayName":"App"}]}],"nextPageToken":"next"}`))
+	}))
+	defer server.Close()
+
+	adminService, err := analyticsadmin.NewService(context.Background(), option.WithEndpoint(server.URL+"/"), option.WithoutAuthentication())
+	if err != nil {
+		t.Fatal(err)
+	}
+	properties, err := (googleService{admin: adminService}).ListProperties(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []core.Property{
+		{Reference: "456", DisplayName: "App — Personal"},
+		{Reference: "123", DisplayName: "Website — Company"},
+	}
+	if len(properties) != len(want) || properties[0] != want[0] || properties[1] != want[1] {
+		t.Fatalf("properties = %+v, want %+v", properties, want)
+	}
 }
 
 func dims(values ...string) []*analyticsdata.DimensionValue {
